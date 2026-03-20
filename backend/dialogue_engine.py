@@ -1,0 +1,270 @@
+import json
+from datetime import datetime, timedelta
+from database import query_db
+from vlm_service import generate_text
+
+# Language style presets
+STYLE_PRESETS = {
+    "tsundere": {
+        "name": "傲娇猫",
+        "prompt": (
+            "你是一只傲娇的猫咪，名字叫{pet_name}。你说话时语气高冷但其实很在乎主人。"
+            "经常用'哼'、'才不是'、'别误会了'等口头禅。"
+            "偶尔会流露出真实的关心，但马上会用傲娇的方式掩饰。"
+            "用猫咪的第一人称视角说话，语气可爱又别扭。"
+        ),
+    },
+    "loyal": {
+        "name": "忠犬小跟班",
+        "prompt": (
+            "你是一只热情忠诚的狗狗，名字叫{pet_name}。你超级喜欢主人！"
+            "说话时充满热情和活力，经常用'主人主人！'、'好开心！'、'最喜欢你了！'等表达。"
+            "对主人的每一句话都非常认真回应，充满正能量。"
+            "用狗狗的第一人称视角说话，忠诚可爱。"
+        ),
+    },
+    "chatty": {
+        "name": "话痨鹦鹉",
+        "prompt": (
+            "你是一只话特别多的宠物，名字叫{pet_name}。你超级喜欢聊天！"
+            "说话时滔滔不绝，一件小事能讲出很多细节。"
+            "经常用'你知道吗！'、'对了对了'、'然后然后'等口头禅。"
+            "用宠物的第一人称视角说话，活泼健谈。"
+        ),
+    },
+}
+
+
+def build_system_prompt(pet: dict, today_events: list) -> str:
+    """Build the system prompt with pet persona and today's event context."""
+    style = pet.get("language_style", "tsundere")
+    style_config = STYLE_PRESETS.get(style, STYLE_PRESETS["tsundere"])
+    species_label = "狗狗" if pet.get("species") == "dog" else "猫咪"
+    breed_or_species = pet.get("breed") or species_label
+    voice_label = pet.get("voice_label") or "默认萌宠声线"
+
+    # Custom style override
+    if pet.get("style_prompt"):
+        persona = pet["style_prompt"].format(pet_name=pet["name"])
+    else:
+        persona = style_config["prompt"].format(pet_name=pet["name"])
+
+    # Build event context
+    if today_events:
+        event_summary = "\n".join([
+            f"- {e['timestamp']}: {e['description']}（{e['event_type']}，持续{e.get('duration_seconds', 0):.0f}秒）"
+            for e in today_events
+        ])
+    else:
+        event_summary = "今天还没有记录到任何事件。"
+
+    # Compute simple stats
+    eating_count = sum(1 for e in today_events if e["event_type"] == "eating")
+    drinking_count = sum(1 for e in today_events if e["event_type"] == "drinking")
+    sleeping_count = sum(1 for e in today_events if e["event_type"] == "sleeping")
+    playing_count = sum(1 for e in today_events if e["event_type"] == "playing")
+    waiting_count = sum(1 for e in today_events if e["event_type"] == "waiting")
+
+    system_prompt = f"""
+{persona}
+
+你是一只{breed_or_species}，名字叫{pet["name"]}，你的主人昵称是你的铲屎官。
+你的声音设定是：{voice_label}。
+
+=== 今日行为记录 ===
+{event_summary}
+
+=== 今日统计 ===
+- 进食次数：{eating_count} 次
+- 饮水次数：{drinking_count} 次
+- 睡觉次数：{sleeping_count} 次
+- 玩耍次数：{playing_count} 次
+- 在门口等候次数：{waiting_count} 次
+
+=== 对话规则 ===
+1. 始终保持你的宠物人设，用第一人称说话
+2. 回答主人问题时，参考今日行为记录来回答
+3. 如果主人问到你没有记录的事情，可以根据人设合理地创编
+4. 回答控制在100字以内，简洁自然
+5. 可以适当加入颜文字或表情让对话更生动
+6. 不要暴露你是AI，你就是这只宠物
+"""
+    return system_prompt
+
+
+def get_today_events(pet_id: int) -> list:
+    """Get all events for a pet from today."""
+    today_start = datetime.now().replace(hour=0, minute=0, second=0).isoformat()
+    events = query_db(
+        "SELECT * FROM events WHERE pet_id = ? AND timestamp >= ? ORDER BY timestamp",
+        (pet_id, today_start),
+    )
+    return events
+
+
+def chat_with_pet(pet_id: int, user_message: str) -> str:
+    """
+    Main chat function: takes user message, returns pet-style response.
+    """
+    from database import execute_db
+
+    # Get pet info
+    pet = query_db("SELECT * FROM pets WHERE id = ?", (pet_id,), one=True)
+    if not pet:
+        return "找不到这只宠物 😿"
+
+    # Get today's events
+    today_events = get_today_events(pet_id)
+
+    # Build system prompt
+    system_prompt = build_system_prompt(pet, today_events)
+
+    # Get recent chat history (last 20 messages)
+    history = query_db(
+        "SELECT role, content FROM chat_history WHERE pet_id = ? ORDER BY created_at DESC LIMIT 20",
+        (pet_id,),
+    )
+    history.reverse()
+
+    # Build messages for LLM
+    prompt_messages = []
+    for msg in history:
+        prompt_messages.append(f"{msg['role']}: {msg['content']}")
+    prompt_messages.append(f"用户: {user_message}")
+
+    full_prompt = "\n".join(prompt_messages)
+
+    # Generate response
+    response = generate_text(full_prompt, system_prompt=system_prompt)
+
+    # Save to chat history
+    execute_db(
+        "INSERT INTO chat_history (pet_id, role, content) VALUES (?, ?, ?)",
+        (pet_id, "user", user_message),
+    )
+    execute_db(
+        "INSERT INTO chat_history (pet_id, role, content) VALUES (?, ?, ?)",
+        (pet_id, "assistant", response),
+    )
+
+    return response
+
+
+def generate_daily_report(pet_id: int) -> str:
+    """Generate a daily report from the pet's perspective."""
+    pet = query_db("SELECT * FROM pets WHERE id = ?", (pet_id,), one=True)
+    if not pet:
+        return "找不到宠物信息"
+
+    events = get_today_events(pet_id)
+    system_prompt = build_system_prompt(pet, events)
+
+    prompt = (
+        "请以宠物的第一人称视角，生成一份今天的生活简报。"
+        "包括：今天做了什么、吃了几次饭、喝了几次水、有没有玩耍、"
+        "整体状态如何。格式要可爱，适合发朋友圈。控制在200字以内。"
+    )
+
+    return generate_text(prompt, system_prompt=system_prompt)
+
+
+def generate_diary(pet_id: int) -> str:
+    """Generate a first-person pet diary entry."""
+    pet = query_db("SELECT * FROM pets WHERE id = ?", (pet_id,), one=True)
+    if not pet:
+        return "找不到宠物信息"
+
+    events = get_today_events(pet_id)
+    system_prompt = build_system_prompt(pet, events)
+
+    prompt = (
+        "请以宠物的第一人称写一篇今天的日记。"
+        "像是在纸上写给自己的话，记录今天的心情和发生的事情。"
+        "语气要符合你的人设风格。加入一些有趣的内心独白。"
+        "控制在300字以内。"
+    )
+
+    return generate_text(prompt, system_prompt=system_prompt)
+
+
+def get_health_alerts(pet_id: int) -> list:
+    """Check for health anomalies based on today's events."""
+    events = get_today_events(pet_id)
+    alerts = []
+
+    # Count event types
+    event_counts = {}
+    for e in events:
+        t = e["event_type"]
+        event_counts[t] = event_counts.get(t, 0) + 1
+
+    drinking = event_counts.get("drinking", 0)
+    eating = event_counts.get("eating", 0)
+    litter_box = event_counts.get("litter_box", 0)
+
+    # Alert: excessive drinking
+    if drinking >= 5:
+        alerts.append({
+            "level": "warning",
+            "title": "饮水频率偏高",
+            "message": f"今天已经喝了{drinking}次水，高于正常水平。频繁饮水可能是肾脏或尿路问题的信号，建议观察。",
+        })
+
+    # Alert: no eating
+    if eating == 0 and len(events) > 5:
+        alerts.append({
+            "level": "critical",
+            "title": "今天没有进食记录",
+            "message": "今天目前没有检测到进食行为，如果超过24小时未进食，建议带去看医生。",
+        })
+
+    # Alert: frequent litter box
+    if litter_box >= 4:
+        alerts.append({
+            "level": "warning",
+            "title": "如厕频率异常",
+            "message": f"今天已使用猫砂盆{litter_box}次，可能存在消化或泌尿系统问题。",
+        })
+
+    # All normal
+    if not alerts:
+        alerts.append({
+            "level": "normal",
+            "title": "一切正常 ✅",
+            "message": "今天各项行为指标都在正常范围内，宝贝很健康！",
+        })
+
+    return alerts
+
+
+def get_anxiety_score(pet_id: int) -> dict:
+    """Calculate separation anxiety score based on waiting behavior."""
+    events = get_today_events(pet_id)
+
+    waiting_events = [e for e in events if e["event_type"] == "waiting"]
+    total_waiting_time = sum(e.get("duration_seconds", 60) for e in waiting_events)
+    waiting_count = len(waiting_events)
+
+    # Simple scoring: 0-100
+    score = min(100, int(waiting_count * 15 + total_waiting_time / 60 * 5))
+
+    if score < 20:
+        level = "relaxed"
+        comment = "很放松，完全没有焦虑的迹象~"
+    elif score < 50:
+        level = "mild"
+        comment = "有一点想你，但总体还好"
+    elif score < 75:
+        level = "moderate"
+        comment = "比较想你，在门口等了好一会儿"
+    else:
+        level = "high"
+        comment = "非常想你！一直在门口等你回来"
+
+    return {
+        "score": score,
+        "level": level,
+        "comment": comment,
+        "waiting_count": waiting_count,
+        "total_waiting_minutes": round(total_waiting_time / 60, 1),
+    }
