@@ -114,6 +114,72 @@ final class APIClient {
         )
     }
 
+    /// SSE streaming chat: calls `onToken` for each received token,
+    /// then `onDone` with related events when the stream finishes.
+    func sendChatStream(
+        petID: Int,
+        message: String,
+        onToken: @Sendable @escaping (String) async -> Void,
+        onDone: @Sendable @escaping ([RelatedEvent]) async -> Void
+    ) async throws {
+        let body = ChatRequest(petID: petID, message: message)
+        let requestBody: Data
+        do {
+            requestBody = try encoder.encode(body)
+        } catch {
+            throw APIError.encodingFailed(error.localizedDescription)
+        }
+
+        let ep = Endpoint(path: "/api/chat/stream", method: .post)
+        var request = try makeRequest(for: ep)
+        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 60
+        request.httpBody = requestBody
+
+        let (stream, response) = try await session.bytes(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            throw APIError.invalidResponse
+        }
+
+        let jsonDecoder = JSONDecoder()
+        jsonDecoder.keyDecodingStrategy = .convertFromSnakeCase
+
+        for try await line in stream.lines {
+            guard line.hasPrefix("data: ") else { continue }
+            let payload = String(line.dropFirst(6))
+
+            guard let data = payload.data(using: .utf8) else { continue }
+
+            // Try to decode as done message
+            struct DoneMessage: Decodable {
+                let done: Bool?
+                let relatedEvents: [RelatedEvent]?
+                enum CodingKeys: String, CodingKey {
+                    case done
+                    case relatedEvents = "related_events"
+                }
+            }
+
+            if let doneMsg = try? jsonDecoder.decode(DoneMessage.self, from: data),
+               doneMsg.done == true {
+                await onDone(doneMsg.relatedEvents ?? [])
+                break
+            }
+
+            // Try to decode as token message
+            struct TokenMessage: Decodable {
+                let token: String
+            }
+
+            if let tokenMsg = try? jsonDecoder.decode(TokenMessage.self, from: data) {
+                await onToken(tokenMsg.token)
+            }
+        }
+    }
+
     func fetchDailyReport(petID: Int) async throws -> DailyReportResponse {
         try await fetch(endpoint: Endpoint(path: "/api/report/daily/\(petID)"))
     }

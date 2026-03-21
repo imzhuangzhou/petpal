@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ChatView: View {
     @EnvironmentObject private var appStore: AppStore
+    @StateObject private var speechRecognizer = SpeechRecognizer()
     @State private var draft = ""
     @State private var messages: [ChatMessage] = []
     @State private var isSubmitting = false
@@ -55,38 +56,55 @@ struct ChatView: View {
                             }
 
                             ForEach(messages) { message in
-                                HStack(alignment: .top, spacing: 8) {
-                                    if message.role == .assistant {
-                                        chatAvatar
-                                    }
+                                VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 6) {
+                                    HStack(alignment: .top, spacing: 8) {
+                                        if message.role == .assistant {
+                                            chatAvatar
+                                        }
 
-                                    Text(message.content)
-                                        .font(.system(size: 14, weight: .medium, design: .rounded))
-                                        .foregroundStyle(message.role == .user ? .white : PetPalTheme.ink)
-                                        .lineSpacing(4)
-                                        .padding(.horizontal, 14)
-                                        .padding(.vertical, 12)
-                                        .background(message.role == .user ? AnyShapeStyle(PetPalTheme.chatUserGradient) : AnyShapeStyle(Color(hex: "FFF7EF")))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                                .stroke(message.role == .assistant ? Color(hex: "E8D5C1").opacity(0.7) : .clear, lineWidth: 1),
-                                            alignment: .center
-                                        )
-                                        .clipShape(
-                                            RoundedRectangle(
-                                                cornerRadius: 20,
-                                                style: .continuous
+                                        Text(message.content)
+                                            .font(.system(size: 14, weight: .medium, design: .rounded))
+                                            .foregroundStyle(message.role == .user ? .white : PetPalTheme.ink)
+                                            .lineSpacing(4)
+                                            .padding(.horizontal, 14)
+                                            .padding(.vertical, 12)
+                                            .background(message.role == .user ? AnyShapeStyle(PetPalTheme.chatUserGradient) : AnyShapeStyle(Color(hex: "FFF7EF")))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                                    .stroke(message.role == .assistant ? Color(hex: "E8D5C1").opacity(0.7) : .clear, lineWidth: 1),
+                                                alignment: .center
                                             )
-                                        )
-                                        .frame(maxWidth: 320, alignment: message.role == .user ? .trailing : .leading)
+                                            .clipShape(
+                                                RoundedRectangle(
+                                                    cornerRadius: 20,
+                                                    style: .continuous
+                                                )
+                                            )
+                                            .frame(maxWidth: 320, alignment: message.role == .user ? .trailing : .leading)
 
-                                    if message.role == .user {
-                                        Spacer(minLength: 0)
-                                    } else {
-                                        Spacer(minLength: 0)
+                                        if message.role == .user {
+                                            Spacer(minLength: 0)
+                                        } else {
+                                            Spacer(minLength: 0)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+
+                                    // Related events cards
+                                    if message.role == .assistant && !message.relatedEvents.isEmpty {
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            Text("📎 相关事件")
+                                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                                .foregroundStyle(PetPalTheme.inkSoft)
+                                                .padding(.leading, 42)
+
+                                            ForEach(message.relatedEvents) { event in
+                                                relatedEventCard(event)
+                                                    .padding(.leading, 42)
+                                            }
+                                        }
                                     }
                                 }
-                                .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
                             }
 
                             if isSubmitting {
@@ -240,6 +258,38 @@ struct ChatView: View {
                 }
 
                 HStack(spacing: 10) {
+                    // Microphone button
+                    Button {
+                        if speechRecognizer.isListening {
+                            speechRecognizer.stopListening()
+                            draft = speechRecognizer.transcript
+                        } else {
+                            speechRecognizer.requestAuthorization()
+                            speechRecognizer.startListening()
+                        }
+                    } label: {
+                        Text(speechRecognizer.isListening ? "🔴" : "🎤")
+                            .font(.system(size: 18))
+                            .frame(width: 42, height: 42)
+                    }
+                    .buttonStyle(.plain)
+                    .background(
+                        speechRecognizer.isListening
+                            ? Color(hex: "FFE5E0").opacity(0.9)
+                            : Color(hex: "FFF7EE").opacity(0.96)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(
+                                speechRecognizer.isListening
+                                    ? Color(hex: "E58A7F").opacity(0.8)
+                                    : PetPalTheme.line,
+                                lineWidth: 1.5
+                            )
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .accessibilityLabel(speechRecognizer.isListening ? "停止录音" : "开始语音输入")
+
                     TextField("和 \(appStore.session.petName.ifEmpty("宠物")) 聊聊天...", text: $draft)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
@@ -282,7 +332,14 @@ struct ChatView: View {
                 ]
             }
         }
+        .onChange(of: speechRecognizer.transcript) {
+            if speechRecognizer.isListening {
+                draft = speechRecognizer.transcript
+            }
+        }
     }
+
+    // MARK: - Computed properties
 
     private var petAvatar: String {
         appStore.session.petSpecies == "dog" ? "🐶" : "🐱"
@@ -308,6 +365,62 @@ struct ChatView: View {
             )
             .padding(.top, 4)
     }
+
+    // MARK: - Related event card
+
+    private func relatedEventCard(_ event: RelatedEvent) -> some View {
+        HStack(spacing: 10) {
+            Text(eventIcon(event.eventType))
+                .font(.system(size: 16))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.description)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(PetPalTheme.ink)
+                    .lineLimit(1)
+
+                Text(formatEventTime(event.timestamp))
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(PetPalTheme.inkSoft)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(hex: "F5EDE3").opacity(0.6))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color(hex: "E8D5C1").opacity(0.5), lineWidth: 1)
+        )
+    }
+
+    private func eventIcon(_ type: String) -> String {
+        switch type {
+        case "eating": return "🍽️"
+        case "drinking": return "💧"
+        case "sleeping": return "😴"
+        case "playing": return "🎾"
+        case "resting": return "☀️"
+        case "waiting": return "🚪"
+        case "litter_box": return "🧹"
+        case "zoomies": return "⚡"
+        default: return "📌"
+        }
+    }
+
+    private func formatEventTime(_ isoString: String) -> String {
+        // Extract HH:mm from ISO timestamp
+        if let tIndex = isoString.firstIndex(of: "T") {
+            let timePart = isoString[isoString.index(after: tIndex)...]
+            let components = timePart.prefix(5)
+            return String(components)
+        }
+        return isoString
+    }
+
+    // MARK: - Subview builders
 
     private func featureButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -404,6 +517,8 @@ struct ChatView: View {
             : "哼，你终于想起来看我了？我今天在门口等了你好一会儿。"
     }
 
+    // MARK: - Actions
+
     private func sendMessage() async {
         guard let petID = appStore.session.petId else { return }
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -416,11 +531,40 @@ struct ChatView: View {
         anxietyReport = nil
         messages.append(ChatMessage(role: .user, content: trimmed))
 
+        // Create an empty assistant message for streaming
+        let streamMessageID = UUID()
+        messages.append(ChatMessage(id: streamMessageID, role: .assistant, content: ""))
+
         do {
-            let response = try await appStore.apiClient.sendChat(petID: petID, message: trimmed)
-            messages.append(ChatMessage(role: .assistant, content: response.reply))
+            try await appStore.apiClient.sendChatStream(
+                petID: petID,
+                message: trimmed,
+                onToken: { token in
+                    await MainActor.run {
+                        if let idx = messages.firstIndex(where: { $0.id == streamMessageID }) {
+                            messages[idx].content += token
+                        }
+                    }
+                },
+                onDone: { relatedEvents in
+                    await MainActor.run {
+                        if let idx = messages.firstIndex(where: { $0.id == streamMessageID }) {
+                            messages[idx].relatedEvents = relatedEvents
+                        }
+                    }
+                }
+            )
         } catch {
-            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            // If streaming fails, remove the empty message and fall back to sync
+            if let idx = messages.firstIndex(where: { $0.id == streamMessageID }) {
+                messages.remove(at: idx)
+            }
+            do {
+                let response = try await appStore.apiClient.sendChat(petID: petID, message: trimmed)
+                messages.append(ChatMessage(role: .assistant, content: response.reply, relatedEvents: response.relatedEvents))
+            } catch {
+                errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            }
         }
 
         isSubmitting = false

@@ -19,6 +19,7 @@
 		A1000001000000000000000A /* DemoVideoUploadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000000A /* DemoVideoUploadView.swift */; };
 		A1000001000000000000000B /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000000B /* ChatView.swift */; };
 		A1000001000000000000000C /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000000C /* SettingsView.swift */; };
+		A1000001000000000000000D /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000000F /* SpeechRecognizer.swift */; };
 		A10000020000000000000001 /* APIError.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000020000000000000001 /* APIError.swift */; };
 		A10000020000000000000002 /* Endpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000020000000000000002 /* Endpoint.swift */; };
 		A10000020000000000000003 /* MultipartFormDataBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000020000000000000003 /* MultipartFormDataBuilder.swift */; };
@@ -37,6 +38,7 @@
 		A10000020000000000000010 /* DiaryResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000020000000000000010 /* DiaryResponse.swift */; };
 		A10000020000000000000011 /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000020000000000000011 /* ChatMessage.swift */; };
 		A10000020000000000000012 /* PickedVideo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000020000000000000012 /* PickedVideo.swift */; };
+		A10000020000000000000013 /* RelatedEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000020000000000000013 /* RelatedEvent.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -54,6 +56,7 @@
 		A2000001000000000000000C /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A2000001000000000000000D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A2000001000000000000000E /* PetPalDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = PetPalDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A2000001000000000000000F /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
 		A20000020000000000000001 /* APIError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIError.swift; sourceTree = "<group>"; };
 		A20000020000000000000002 /* Endpoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Endpoint.swift; sourceTree = "<group>"; };
 		A20000020000000000000003 /* MultipartFormDataBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultipartFormDataBuilder.swift; sourceTree = "<group>"; };
@@ -72,6 +75,7 @@
 		A20000020000000000000010 /* DiaryResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaryResponse.swift; sourceTree = "<group>"; };
 		A20000020000000000000011 /* ChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
 		A20000020000000000000012 /* PickedVideo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PickedVideo.swift; sourceTree = "<group>"; };
+		A20000020000000000000013 /* RelatedEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelatedEvent.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -156,6 +160,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000010000000000000003 /* AppEnvironment.swift */,
+				A2000001000000000000000F /* SpeechRecognizer.swift */,
 			);
 			path = Environment;
 			sourceTree = "<group>";
@@ -190,6 +195,7 @@
 				A20000020000000000000010 /* DiaryResponse.swift */,
 				A20000020000000000000011 /* ChatMessage.swift */,
 				A20000020000000000000012 /* PickedVideo.swift */,
+				A20000020000000000000013 /* RelatedEvent.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -311,6 +317,7 @@
 				A1000001000000000000000A /* DemoVideoUploadView.swift in Sources */,
 				A1000001000000000000000B /* ChatView.swift in Sources */,
 				A1000001000000000000000C /* SettingsView.swift in Sources */,
+				A1000001000000000000000D /* SpeechRecognizer.swift in Sources */,
 				A10000020000000000000001 /* APIError.swift in Sources */,
 				A10000020000000000000002 /* Endpoint.swift in Sources */,
 				A10000020000000000000003 /* MultipartFormDataBuilder.swift in Sources */,
@@ -329,6 +336,7 @@
 				A10000020000000000000010 /* DiaryResponse.swift in Sources */,
 				A10000020000000000000011 /* ChatMessage.swift in Sources */,
 				A10000020000000000000012 /* PickedVideo.swift in Sources */,
+				A10000020000000000000013 /* RelatedEvent.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

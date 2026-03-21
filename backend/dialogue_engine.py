@@ -1,7 +1,8 @@
 import json
+import re
 from datetime import datetime, timedelta
 from database import query_db
-from vlm_service import generate_text
+from vlm_service import generate_text, get_vlm_client, TEXT_MODEL
 
 # Language style presets
 STYLE_PRESETS = {
@@ -35,6 +36,68 @@ STYLE_PRESETS = {
 }
 
 
+# ── Event summary cache ──────────────────────────────────────────
+# In-memory cache keyed by pet_id.  Each value holds a pre-built summary
+# string, raw event list, computed stats dict, and an expiry timestamp.
+# TTL = 10 minutes — a good balance for demo-scale traffic.
+_event_cache: dict = {}  # {pet_id: {"summary": str, "stats": dict, "events": list, "expires": datetime}}
+_CACHE_TTL = timedelta(minutes=10)
+
+
+def _build_event_summary(events: list) -> str:
+    """Build a concise text summary from raw event rows."""
+    if not events:
+        return "今天还没有记录到任何事件。"
+    return "\n".join([
+        f"- {e['timestamp']}: {e['description']}（{e['event_type']}，持续{e.get('duration_seconds', 0):.0f}秒）"
+        for e in events
+    ])
+
+
+def _compute_stats(events: list) -> dict:
+    """Compute per-type counts for prompt injection."""
+    counts: dict[str, int] = {}
+    for e in events:
+        t = e["event_type"]
+        counts[t] = counts.get(t, 0) + 1
+    return {
+        "eating": counts.get("eating", 0),
+        "drinking": counts.get("drinking", 0),
+        "sleeping": counts.get("sleeping", 0),
+        "playing": counts.get("playing", 0),
+        "waiting": counts.get("waiting", 0),
+        "litter_box": counts.get("litter_box", 0),
+    }
+
+
+def get_today_events(pet_id: int) -> list:
+    """Get all events for a pet from today."""
+    today_start = datetime.now().replace(hour=0, minute=0, second=0).isoformat()
+    events = query_db(
+        "SELECT * FROM events WHERE pet_id = ? AND timestamp >= ? ORDER BY timestamp",
+        (pet_id, today_start),
+    )
+    return events
+
+
+def get_cached_event_context(pet_id: int) -> tuple[str, dict, list]:
+    """Return (summary_text, stats_dict, events_list) from cache or fresh query."""
+    cached = _event_cache.get(pet_id)
+    if cached and cached["expires"] > datetime.now():
+        return cached["summary"], cached["stats"], cached["events"]
+
+    events = get_today_events(pet_id)
+    summary = _build_event_summary(events)
+    stats = _compute_stats(events)
+    _event_cache[pet_id] = {
+        "summary": summary,
+        "stats": stats,
+        "events": events,
+        "expires": datetime.now() + _CACHE_TTL,
+    }
+    return summary, stats, events
+
+
 def build_system_prompt(pet: dict, today_events: list) -> str:
     """Build the system prompt with pet persona and today's event context."""
     style = pet.get("language_style", "tsundere")
@@ -49,21 +112,9 @@ def build_system_prompt(pet: dict, today_events: list) -> str:
     else:
         persona = style_config["prompt"].format(pet_name=pet["name"])
 
-    # Build event context
-    if today_events:
-        event_summary = "\n".join([
-            f"- {e['timestamp']}: {e['description']}（{e['event_type']}，持续{e.get('duration_seconds', 0):.0f}秒）"
-            for e in today_events
-        ])
-    else:
-        event_summary = "今天还没有记录到任何事件。"
-
-    # Compute simple stats
-    eating_count = sum(1 for e in today_events if e["event_type"] == "eating")
-    drinking_count = sum(1 for e in today_events if e["event_type"] == "drinking")
-    sleeping_count = sum(1 for e in today_events if e["event_type"] == "sleeping")
-    playing_count = sum(1 for e in today_events if e["event_type"] == "playing")
-    waiting_count = sum(1 for e in today_events if e["event_type"] == "waiting")
+    # Use cached event context
+    pet_id = pet.get("id") or 0
+    event_summary, stats, _ = get_cached_event_context(pet_id)
 
     system_prompt = f"""
 {persona}
@@ -75,11 +126,11 @@ def build_system_prompt(pet: dict, today_events: list) -> str:
 {event_summary}
 
 === 今日统计 ===
-- 进食次数：{eating_count} 次
-- 饮水次数：{drinking_count} 次
-- 睡觉次数：{sleeping_count} 次
-- 玩耍次数：{playing_count} 次
-- 在门口等候次数：{waiting_count} 次
+- 进食次数：{stats['eating']} 次
+- 饮水次数：{stats['drinking']} 次
+- 睡觉次数：{stats['sleeping']} 次
+- 玩耍次数：{stats['playing']} 次
+- 在门口等候次数：{stats['waiting']} 次
 
 === 对话规则 ===
 1. 始终保持你的宠物人设，用第一人称说话
@@ -92,14 +143,27 @@ def build_system_prompt(pet: dict, today_events: list) -> str:
     return system_prompt
 
 
-def get_today_events(pet_id: int) -> list:
-    """Get all events for a pet from today."""
-    today_start = datetime.now().replace(hour=0, minute=0, second=0).isoformat()
-    events = query_db(
-        "SELECT * FROM events WHERE pet_id = ? AND timestamp >= ? ORDER BY timestamp",
-        (pet_id, today_start),
+def _prepare_chat_context(pet_id: int, user_message: str):
+    """Shared helper: build system prompt + full prompt for a chat turn."""
+    pet = query_db("SELECT * FROM pets WHERE id = ?", (pet_id,), one=True)
+    if not pet:
+        return None, None, None
+
+    system_prompt = build_system_prompt(pet, [])
+
+    history = query_db(
+        "SELECT role, content FROM chat_history WHERE pet_id = ? ORDER BY created_at DESC LIMIT 20",
+        (pet_id,),
     )
-    return events
+    history.reverse()
+
+    prompt_messages = []
+    for msg in history:
+        prompt_messages.append(f"{msg['role']}: {msg['content']}")
+    prompt_messages.append(f"用户: {user_message}")
+
+    full_prompt = "\n".join(prompt_messages)
+    return pet, system_prompt, full_prompt
 
 
 def chat_with_pet(pet_id: int, user_message: str) -> str:
@@ -108,36 +172,12 @@ def chat_with_pet(pet_id: int, user_message: str) -> str:
     """
     from database import execute_db
 
-    # Get pet info
-    pet = query_db("SELECT * FROM pets WHERE id = ?", (pet_id,), one=True)
+    pet, system_prompt, full_prompt = _prepare_chat_context(pet_id, user_message)
     if not pet:
         return "找不到这只宠物 😿"
 
-    # Get today's events
-    today_events = get_today_events(pet_id)
-
-    # Build system prompt
-    system_prompt = build_system_prompt(pet, today_events)
-
-    # Get recent chat history (last 20 messages)
-    history = query_db(
-        "SELECT role, content FROM chat_history WHERE pet_id = ? ORDER BY created_at DESC LIMIT 20",
-        (pet_id,),
-    )
-    history.reverse()
-
-    # Build messages for LLM
-    prompt_messages = []
-    for msg in history:
-        prompt_messages.append(f"{msg['role']}: {msg['content']}")
-    prompt_messages.append(f"用户: {user_message}")
-
-    full_prompt = "\n".join(prompt_messages)
-
-    # Generate response
     response = generate_text(full_prompt, system_prompt=system_prompt)
 
-    # Save to chat history
     execute_db(
         "INSERT INTO chat_history (pet_id, role, content) VALUES (?, ?, ?)",
         (pet_id, "user", user_message),
@@ -148,6 +188,102 @@ def chat_with_pet(pet_id: int, user_message: str) -> str:
     )
 
     return response
+
+
+def chat_with_pet_stream(pet_id: int, user_message: str):
+    """
+    Streaming chat generator: yields tokens one-by-one via OpenAI stream.
+    After the generator is exhausted, call `get_stream_full_reply()` on
+    the returned object — or simply use the helper in the route.
+    """
+    from database import execute_db
+
+    pet, system_prompt, full_prompt = _prepare_chat_context(pet_id, user_message)
+    if not pet:
+        yield "找不到这只宠物 😿"
+        return
+
+    client = get_vlm_client()
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": full_prompt})
+
+    stream = client.chat.completions.create(
+        model=TEXT_MODEL,
+        messages=messages,
+        max_tokens=1000,
+        stream=True,
+    )
+
+    collected_tokens: list[str] = []
+    for chunk in stream:
+        delta = chunk.choices[0].delta if chunk.choices else None
+        if delta and delta.content:
+            collected_tokens.append(delta.content)
+            yield delta.content
+
+    full_reply = "".join(collected_tokens)
+
+    # Persist to chat history
+    execute_db(
+        "INSERT INTO chat_history (pet_id, role, content) VALUES (?, ?, ?)",
+        (pet_id, "user", user_message),
+    )
+    execute_db(
+        "INSERT INTO chat_history (pet_id, role, content) VALUES (?, ?, ?)",
+        (pet_id, "assistant", full_reply),
+    )
+
+
+# ── Related event matching ───────────────────────────────────────
+
+def match_related_events(reply_text: str, pet_id: int, top_n: int = 3) -> list[dict]:
+    """
+    After the LLM generates a reply, find events whose descriptions
+    share significant keyword overlap with the reply text.
+    Returns a list of dicts suitable for JSON serialisation.
+    """
+    _, _, events = get_cached_event_context(pet_id)
+    if not events:
+        return []
+
+    # Tokenise into Chinese character n-grams + whole-word fragments
+    def _keywords(text: str) -> set[str]:
+        # Remove punctuation / emoji, keep Chinese chars and letters
+        cleaned = re.sub(r"[^\u4e00-\u9fff\w]", " ", text)
+        tokens: set[str] = set()
+        for seg in cleaned.split():
+            if len(seg) >= 2:
+                tokens.add(seg)
+            # Also add 2-char sliding window for Chinese
+            for i in range(len(seg) - 1):
+                tokens.add(seg[i:i+2])
+        return tokens
+
+    reply_kw = _keywords(reply_text)
+    if not reply_kw:
+        return []
+
+    scored: list[tuple[float, dict]] = []
+    for e in events:
+        desc_kw = _keywords(e.get("description", ""))
+        overlap = len(reply_kw & desc_kw)
+        if overlap > 0:
+            scored.append((overlap, e))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    results = []
+    for _, e in scored[:top_n]:
+        results.append({
+            "event_id": e.get("id"),
+            "event_type": e.get("event_type", ""),
+            "description": e.get("description", ""),
+            "timestamp": e.get("timestamp", ""),
+            "video_clip_url": e.get("frame_path", ""),
+        })
+    return results
 
 
 def generate_daily_report(pet_id: int) -> str:
