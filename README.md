@@ -1,69 +1,36 @@
 # PetPal
 
-An AI pet companion demo that turns home pet activity into first-person conversations, daily reports, health alerts, and playful diary entries.
+PetPal 现已收敛为一个仅保留 iOS 客户端的项目形态。仓库中不再包含 Web 前端，唯一客户端实现位于 `ios/`，并继续通过 `backend/` 提供本地开发时所需的 API 服务。
 
-PetPal is designed as a product-style prototype rather than a pure hackathon mock. The current version implements the full user flow for onboarding, pet profile setup, voice selection, demo video upload, contextual chat, and settings management. The only mocked part is the camera binding and video understanding pipeline: uploaded demo videos are currently used to seed structured daily events instead of running a full real-world vision pipeline end to end.
+## 当前仓库内容
 
----
+- `ios/`: SwiftUI iOS 客户端工程
+- `backend/`: FastAPI 本地开发后端
+- `README.md`: 仓库总说明
+- `LICENSE`: 许可证
 
-## 中文介绍
+## iOS 客户端能力
 
-PetPal 是一个“宠物 AI 管家”产品原型。它希望把“我不在家时宠物在做什么”这件事，变成一种更自然、更有陪伴感的交互方式。
+iOS 客户端当前覆盖的主流程包括：
 
-用户可以先创建宠物档案，选择宠物种类、聊天人格和声音风格，再上传一段演示视频作为当天的行为上下文。随后，系统会围绕这段上下文生成可对话的宠物形象，让用户通过聊天获取：
-
-- 宠物第一人称回复
+- 欢迎页与用户创建
+- 宠物创建
+- 演示视频上传
+- 聊天
 - 每日简报
 - 健康告警
 - 焦虑指数
 - 宠物日记
+- 设置页替换演示视频
 
-当前版本中，摄像头绑定与视频理解链路仍为演示模式：
-- 可以上传演示视频
-- 设置页中可以更换视频
-- 聊天和功能页会基于该视频对应的 mock 行为事件生成内容
+说明：
+- 摄像头绑定与真实视频理解仍为演示模式
+- 上传后的视频当前仍用于生成 mock 行为上下文
+- 未配置 `DASHSCOPE_API_KEY` 时，界面与基础流程可打开，但依赖模型的能力会失败
 
-也就是说，产品流程已经尽可能接近真实产品，但视频分析本身仍是 mock 数据驱动。
+## 本地运行
 
-### 核心功能
-
-- 宠物档案创建：支持猫 / 狗两种宠物种类
-- 宠物人格设定：选择不同聊天风格
-- 声音设定：支持预设声音试听，也支持录制真实宠物声音样本
-- 演示视频上传：上传后自动进入主页，并建立当日上下文
-- 聊天主页：围绕上下文事件进行自然语言对话
-- 附加能力：每日简报、健康告警、焦虑指数、宠物日记
-- 设置页：查看声音配置、回放样本、替换演示视频
-
-### 技术栈
-
-- Frontend: React 19, Vite, React Router
-- Backend: FastAPI, SQLite
-- AI integration: DashScope OpenAI-compatible API
-- Media: Browser MediaRecorder, local file upload
-
-### 快速启动
-
-#### 方式一：一键启动
-
-```bash
-./start-dev.sh
-```
-
-如果你已经有 DashScope / 阿里云百炼 API Key，可以先设置环境变量：
-
-```bash
-export DASHSCOPE_API_KEY='your_api_key'
-```
-
-启动后默认地址：
-
-- Frontend: `http://localhost:5173`
-- Backend: `http://localhost:8000`
-
-#### 方式二：分别启动
-
-后端：
+### 1. 启动后端
 
 ```bash
 cd backend
@@ -74,126 +41,50 @@ export DASHSCOPE_API_KEY='your_api_key'
 python3 -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-前端：
+如果只是验证界面或非模型链路，可以不设置 `DASHSCOPE_API_KEY`。
+
+### 2. 打开 iOS 工程
 
 ```bash
-cd frontend
-npm install
-npm run dev -- --host 0.0.0.0 --port 5173
+open ios/PetPalDemo.xcodeproj
 ```
 
-### 演示流程
+然后在 Xcode 中：
 
-1. 输入用户昵称
-2. 创建宠物档案，选择种类、人格和声音
-3. 可选：录一段真实宠物声音样本
-4. 上传一段演示视频作为当天上下文
-5. 进入聊天主页，体验聊天、简报、日记、焦虑指数和健康告警
-6. 在设置页中替换当前演示视频
+1. 选择 Scheme: `PetPalDemo`
+2. 选择一个 Simulator，例如 `iPhone 16`
+3. 点击 Run，或按 `Cmd + R`
 
-### 当前限制
+## API 地址配置
 
-- 真正的 RTSP / 家庭摄像头接入尚未完成
-- 上传视频后当前使用 mock 事件时间线生成上下文
-- 录音样本已保存并纳入产品流程，但尚未接入真实声纹克隆 / TTS
+iOS 客户端通过 `Info.plist` 中的 `API_BASE_URL` 读取后端地址，文件位置：
 
-### 目录结构
+- `ios/PetPalDemo/Resources/Info.plist`
+
+默认值：
+
+```text
+http://localhost:8000
+```
+
+适用场景：
+
+- 使用 iPhone Simulator 联调本机后端时，可直接使用 `http://localhost:8000`
+- 使用真机联调时，请改成你电脑的局域网 IP，例如 `http://192.168.x.x:8000`
+
+## 目录结构
 
 ```text
 petpal/
-├── backend/        # FastAPI backend, data models, routes, AI orchestration
-├── frontend/       # React + Vite frontend
-├── start-dev.sh    # One-command local startup script
+├── backend/                    # FastAPI 本地开发后端
+├── ios/                        # SwiftUI iOS 客户端
+│   ├── PetPalDemo/
+│   ├── PetPalDemo.xcodeproj
+│   └── README.md
 ├── README.md
 └── LICENSE
 ```
 
----
-
-## English
-
-PetPal is an AI pet companion prototype that turns home pet activity into a more emotional and conversational product experience.
-
-Users can create a pet profile, choose the pet type, chat persona, and voice style, then upload a demo video as the context for the day. Based on that context, the app provides a pet-facing conversational interface with:
-
-- First-person pet chat replies
-- Daily summaries
-- Health alerts
-- Separation anxiety scoring
-- Pet diary generation
-
-In the current version, the camera-binding and video-understanding pipeline is still in demo mode:
-
-- You can upload a demo video
-- You can replace that video later in Settings
-- The chat and reports are generated from structured mock daily events seeded for that video
-
-So the product flow is intentionally close to a real product, while the camera/video intelligence layer is still mocked.
-
-### Features
-
-- Pet onboarding with two species options: cat and dog
-- Pet persona selection for different conversation styles
-- Voice setup with preset voice previews
-- Optional real pet voice sample recording
-- Demo video upload for contextual chat
-- Context-aware chat interface
-- Daily report, health alerts, anxiety score, and diary features
-- Settings screen for managing voice and replacing the demo video
-
-### Tech Stack
-
-- Frontend: React 19, Vite, React Router
-- Backend: FastAPI, SQLite
-- AI integration: DashScope OpenAI-compatible API
-- Media: Browser MediaRecorder, local file uploads
-
-### Quick Start
-
-#### Option 1: one-command startup
-
-```bash
-./start-dev.sh
-```
-
-If you already have a DashScope API key:
-
-```bash
-export DASHSCOPE_API_KEY='your_api_key'
-```
-
-Default local URLs:
-
-- Frontend: `http://localhost:5173`
-- Backend: `http://localhost:8000`
-
-#### Option 2: run frontend and backend separately
-
-Backend:
-
-```bash
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements.txt
-export DASHSCOPE_API_KEY='your_api_key'
-python3 -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-Frontend:
-
-```bash
-cd frontend
-npm install
-npm run dev -- --host 0.0.0.0 --port 5173
-```
-
-### Limitations
-
-- Real RTSP / home camera integration is not implemented yet
-- Uploaded videos currently seed mock daily events instead of full video analysis
-- Recorded pet voice samples are stored in the product flow, but real voice cloning / TTS is not connected yet
-
 ## License
 
-This project is licensed under the GNU General Public License v3.0. See the [LICENSE](./LICENSE) file for details.
+This project is licensed under the GNU General Public License v3.0. See [LICENSE](./LICENSE) for details.

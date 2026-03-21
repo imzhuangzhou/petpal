@@ -20,7 +20,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS for frontend dev server
+# CORS kept permissive for local iOS development and simulator/device testing
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
