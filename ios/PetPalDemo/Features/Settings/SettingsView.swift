@@ -39,6 +39,7 @@ struct SettingsView: View {
                         PetPalHeroCard(
                             badge: "Profile",
                             stamp: petAvatar,
+                            stampImageURL: petAvatarImageURL,
                             title: appStore.session.petName.ifEmpty("PetPal"),
                             subtitle: "主人是 \(appStore.session.nickname.ifEmpty("你"))，当前宠物种类为 \(appStore.session.petSpecies == "dog" ? "狗狗" : "猫咪")。"
                         )
@@ -80,19 +81,24 @@ struct SettingsView: View {
 
                         PetPalPanelCard {
                             PetPalSectionHeader(
-                                eyebrow: "视频上下文",
-                                title: "随时替换今天的演示视频",
+                                eyebrow: "摄像头配置",
+                                title: "当前绑定的家庭摄像头",
                                 chipText: nil
                             )
 
                             PetPalSurfaceCard {
                                 PetPalInfoRow(
-                                    title: "当前视频",
+                                    title: "当前摄像头",
+                                    value: appStore.session.cameraName.ifEmpty("未绑定")
+                                )
+
+                                PetPalInfoRow(
+                                    title: "联调视频",
                                     value: appStore.session.demoVideoName.ifEmpty("未上传")
                                 )
 
                                 if let selectedVideo {
-                                    Text("待上传文件：\(selectedVideo.url.lastPathComponent)")
+                                    Text("待更新联调视频：\(selectedVideo.url.lastPathComponent)")
                                         .font(.system(size: 13, weight: .bold, design: .rounded))
                                         .foregroundStyle(PetPalTheme.ink)
                                 }
@@ -108,7 +114,7 @@ struct SettingsView: View {
                                     matching: .videos,
                                     photoLibrary: .shared()
                                 ) {
-                                    Text(selectedVideo == nil ? "选择新视频" : "重新选择视频")
+                                    Text(selectedVideo == nil ? "选择联调视频" : "重新选择联调视频")
                                 }
                                 .buttonStyle(PetPalSecondaryButtonStyle())
                                 .onChange(of: selectedItem) {
@@ -127,7 +133,7 @@ struct SettingsView: View {
                                             ProgressView()
                                                 .tint(PetPalTheme.ink)
                                         } else {
-                                            Text("上传替换视频")
+                                            Text("上传并更新联调视频")
                                         }
                                     }
                                 }
@@ -154,7 +160,7 @@ struct SettingsView: View {
                                 chipText: nil
                             )
 
-                            Text("如果你想重新创建宠物档案、重新录声音或重新绑定一段上下文视频，可以从这里回到起点。")
+                            Text("如果你想重新创建宠物档案、重新录声音或重新绑定家庭摄像头，可以从这里回到起点。")
                                 .font(.system(size: 13, weight: .medium, design: .rounded))
                                 .foregroundStyle(PetPalTheme.inkSoft)
                                 .lineSpacing(3)
@@ -172,8 +178,8 @@ struct SettingsView: View {
 
                 if isUploading {
                     PetPalLoadingOverlay(
-                        title: "正在替换演示视频...",
-                        subtitle: "新的上下文会在上传完成后立即生效。"
+                        title: "正在更新联调视频...",
+                        subtitle: "新的摄像头上下文会在上传完成后立即生效。"
                     )
                 }
             }
@@ -182,6 +188,11 @@ struct SettingsView: View {
 
     private var petAvatar: String {
         appStore.session.petSpecies == "dog" ? "🐶" : "🐱"
+    }
+
+    private var petAvatarImageURL: URL? {
+        let preferredPath = appStore.session.petAvatarURL.ifEmpty(appStore.session.petPhotoURL)
+        return appStore.apiClient.resolvedURL(for: preferredPath)
     }
 
     private var selectedPreviewURL: URL? {
@@ -225,7 +236,7 @@ struct SettingsView: View {
                 DemoVideoUploadRequest(
                     userID: userID,
                     petID: petID,
-                    cameraName: "家庭摄像头",
+                    cameraName: appStore.session.cameraName.ifEmpty("家庭摄像头"),
                     cameraID: appStore.session.cameraId,
                     videoFileURL: selectedVideo.url
                 )

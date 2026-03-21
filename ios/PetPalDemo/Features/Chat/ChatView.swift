@@ -15,6 +15,7 @@ struct ChatView: View {
             VStack(spacing: 0) {
                 PetPalChatHeader(
                     avatar: petAvatar,
+                    avatarImageURL: petAvatarImageURL,
                     title: appStore.session.petName.ifEmpty("PetPal"),
                     subtitle: "今日上下文已加载，可以开始聊天了"
                 ) {
@@ -29,7 +30,7 @@ struct ChatView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         PetPalCapsuleLabel(
-                            text: "视频上下文：\(appStore.session.demoVideoName.ifEmpty("已接入演示视频"))",
+                            text: "已连接摄像头：\(cameraContextName)",
                             style: .context
                         )
                         PetPalCapsuleLabel(
@@ -49,7 +50,7 @@ struct ChatView: View {
                                     .font(.system(size: 15, weight: .black, design: .rounded))
                                     .foregroundStyle(PetPalTheme.ink)
 
-                                Text("现在的对话会结合 \(appStore.session.demoVideoName.ifEmpty("当前视频")) 生成的行为事件来回答你。")
+                                Text("现在的对话会结合 \(cameraContextName) 的今日画面和联调回放来回答你。")
                                     .font(.system(size: 13, weight: .medium, design: .rounded))
                                     .foregroundStyle(PetPalTheme.inkSoft)
                                     .lineSpacing(3)
@@ -345,6 +346,15 @@ struct ChatView: View {
         appStore.session.petSpecies == "dog" ? "🐶" : "🐱"
     }
 
+    private var petAvatarImageURL: URL? {
+        let preferredPath = appStore.session.petAvatarURL.ifEmpty(appStore.session.petPhotoURL)
+        return appStore.apiClient.resolvedURL(for: preferredPath)
+    }
+
+    private var cameraContextName: String {
+        appStore.session.cameraName.ifEmpty("家庭摄像头")
+    }
+
     private var canSendMessage: Bool {
         !isSubmitting && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -360,8 +370,14 @@ struct ChatView: View {
             )
             .frame(width: 34, height: 34)
             .overlay(
-                Text(petAvatar)
-                    .font(.system(size: 18))
+                PetPalImageFill(
+                    imageURL: petAvatarImageURL,
+                    fallbackEmoji: petAvatar,
+                    emojiSize: 18,
+                    contentMode: .fill
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .padding(3)
             )
             .padding(.top, 4)
     }

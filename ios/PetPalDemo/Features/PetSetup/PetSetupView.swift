@@ -1,8 +1,11 @@
 import AVFoundation
 import SwiftUI
+import UniformTypeIdentifiers
+import UIKit
 
 struct PetSetupView: View {
     @EnvironmentObject private var appStore: AppStore
+    @State private var currentStep = 0
     @State private var petName = ""
     @State private var species = "cat"
     @State private var style = "tsundere"
@@ -17,11 +20,13 @@ struct PetSetupView: View {
     @State private var audioRecorder: AVAudioRecorder?
     @State private var recordingTimer: Timer?
     @State private var stopWorkItem: DispatchWorkItem?
-
-    private let twoColumns = [
-        GridItem(.flexible(), spacing: 12),
-        GridItem(.flexible(), spacing: 12),
-    ]
+    @State private var isFileImporterPresented = false
+    @State private var referencePhotoLocalURL: URL?
+    @State private var referencePhotoRemotePath = ""
+    @State private var generatedAvatarRemotePath = ""
+    @State private var confirmedAvatarRemotePath = ""
+    @State private var avatarGenerationState: AvatarGenerationState = .idle
+    @State private var avatarMessage: String?
 
     private let speciesOptions = [
         SpeciesOption(id: "cat", emoji: "🐱", label: "喵星人", summary: "轻盈、敏感、会把心事藏在尾巴尖。", defaultVoiceKey: "cat-soft"),
@@ -50,282 +55,65 @@ struct PetSetupView: View {
 
     var body: some View {
         PetPalShell {
-            ZStack {
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 16) {
-                        PetPalStepIndicator(total: 2, current: 0)
+            GeometryReader { geometry in
+                let contentWidth = min(max(geometry.size.width - 40, 280), 520)
+                let isCompactLayout = contentWidth < 360
 
-                        PetPalHeroCard(
-                            badge: "Pet setup",
-                            stamp: selectedSpecies.emoji,
-                            title: "认识一下新伙伴",
-                            subtitle: "先定好它的种类、说话风格和声音，后面聊天时就会更像它本人。"
-                        )
+                ZStack {
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 16) {
+                            PetPalStepIndicator(total: 3, current: currentStep)
 
-                        PetPalPanelCard {
-                            PetPalSectionHeader(
-                                eyebrow: "基础信息",
-                                title: "它是家里的哪位小朋友？",
-                                chipText: "Step 1"
+                            PetPalHeroCard(
+                                badge: "Pet setup",
+                                stamp: selectedSpecies.emoji,
+                                stampImageURL: currentHeroImageURL,
+                                title: heroTitle,
+                                subtitle: heroSubtitle
                             )
 
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("名字")
-                                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                                    .foregroundStyle(PetPalTheme.inkSoft)
-
-                                TextField("例如：发财、奶盖、奥利奥...", text: $petName)
-                                    .petPalTextFieldStyle()
-                                    .accessibilityLabel("宠物名字输入框")
+                            PetPalPanelCard {
+                                switch currentStep {
+                                case 0:
+                                    stepOneContent(contentWidth: contentWidth, isCompactLayout: isCompactLayout)
+                                case 1:
+                                    stepTwoContent(contentWidth: contentWidth, isCompactLayout: isCompactLayout)
+                                default:
+                                    stepThreeContent(contentWidth: contentWidth, isCompactLayout: isCompactLayout)
+                                }
                             }
 
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("宠物种类")
-                                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                                    .foregroundStyle(PetPalTheme.inkSoft)
-
-                                LazyVGrid(columns: twoColumns, spacing: 12) {
-                                    ForEach(speciesOptions) { option in
-                                        Button {
-                                            species = option.id
-                                        } label: {
-                                            VStack(alignment: .leading, spacing: 8) {
-                                                Text(option.emoji)
-                                                    .font(.system(size: 28))
-
-                                                Text(option.label)
-                                                    .font(.system(size: 15, weight: .black, design: .rounded))
-                                                    .foregroundStyle(PetPalTheme.ink)
-
-                                                Text(option.summary)
-                                                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                                                    .foregroundStyle(PetPalTheme.inkSoft)
-                                                    .multilineTextAlignment(.leading)
-                                                    .lineSpacing(3)
-                                            }
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .padding(16)
-                                            .background(tileFill(isSelected: species == option.id))
-                                            .overlay(tileBorder(isSelected: species == option.id))
-                                            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
+                            if let errorMessage {
+                                Text(errorMessage)
+                                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                                    .foregroundStyle(PetPalTheme.danger)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
-
-                        PetPalPanelCard {
-                            PetPalSectionHeader(
-                                eyebrow: "聊天人格",
-                                title: "它平时会怎么跟你说话？",
-                                chipText: "Step 2"
-                            )
-
-                            LazyVGrid(columns: twoColumns, spacing: 12) {
-                                ForEach(styleOptions) { option in
-                                    Button {
-                                        style = option.id
-                                    } label: {
-                                        VStack(alignment: .leading, spacing: 8) {
-                                            Text(option.emoji)
-                                                .font(.system(size: 24))
-
-                                            Text(option.name)
-                                                .font(.system(size: 15, weight: .black, design: .rounded))
-                                                .foregroundStyle(PetPalTheme.ink)
-
-                                            Text(option.desc)
-                                                .font(.system(size: 13, weight: .medium, design: .rounded))
-                                                .foregroundStyle(PetPalTheme.inkSoft)
-                                                .multilineTextAlignment(.leading)
-                                                .lineSpacing(3)
-                                        }
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(16)
-                                        .background(tileFill(isSelected: style == option.id))
-                                        .overlay(tileBorder(isSelected: style == option.id))
-                                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-
-                        PetPalPanelCard {
-                            PetPalSectionHeader(
-                                eyebrow: "声音设定",
-                                title: "先选一个像它的声音，再决定要不要复刻真实原声",
-                                chipText: "Step 3"
-                            )
-
-                            LazyVGrid(columns: twoColumns, spacing: 12) {
-                                ForEach(availableVoices) { preset in
-                                    VStack(spacing: 10) {
-                                        Button {
-                                            voiceMode = "preset"
-                                            selectedVoiceKey = preset.id
-                                            helperMessage = nil
-                                        } label: {
-                                            VStack(alignment: .leading, spacing: 8) {
-                                                HStack(alignment: .top, spacing: 8) {
-                                                    Text(preset.name)
-                                                        .font(.system(size: 15, weight: .black, design: .rounded))
-                                                        .foregroundStyle(PetPalTheme.ink)
-
-                                                    Spacer(minLength: 6)
-
-                                                    Text(preset.badge)
-                                                        .font(.system(size: 11, weight: .black, design: .rounded))
-                                                        .foregroundStyle(PetPalTheme.caramel)
-                                                        .padding(.horizontal, 9)
-                                                        .padding(.vertical, 4)
-                                                        .background(Color(hex: "FFE8CF").opacity(0.95))
-                                                        .clipShape(Capsule())
-                                                }
-
-                                                Text(preset.tone)
-                                                    .font(.system(size: 12, weight: .black, design: .rounded))
-                                                    .foregroundStyle(Color(hex: "9E7760"))
-
-                                                Text(preset.description)
-                                                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                                                    .foregroundStyle(PetPalTheme.inkSoft)
-                                                    .multilineTextAlignment(.leading)
-                                                    .lineSpacing(3)
-                                            }
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .padding(16)
-                                            .background(tileFill(isSelected: voiceMode == "preset" && selectedVoiceKey == preset.id))
-                                            .overlay(tileBorder(isSelected: voiceMode == "preset" && selectedVoiceKey == preset.id))
-                                            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                                        }
-                                        .buttonStyle(.plain)
-
-                                        Button("试听一下") {
-                                            helperMessage = "iOS Demo 暂未接入预设声音试听，但会保留和 web 一致的声音配置。"
-                                        }
-                                        .buttonStyle(PetPalSecondaryButtonStyle())
-                                    }
-                                }
-                            }
-
-                            PetPalSurfaceCard {
-                                HStack(alignment: .top, spacing: 12) {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        HStack(alignment: .center, spacing: 8) {
-                                            Text("复刻真实宠物声音")
-                                                .font(.system(size: 15, weight: .black, design: .rounded))
-                                                .foregroundStyle(PetPalTheme.ink)
-
-                                            Spacer(minLength: 8)
-
-                                            PetPalCapsuleLabel(text: "可选", style: .soft)
-                                        }
-
-                                        Text("录 3-6 秒叫声、呼噜声或日常撒娇声，我们会把它保存成专属声音样本。")
-                                            .font(.system(size: 13, weight: .medium, design: .rounded))
-                                            .foregroundStyle(PetPalTheme.inkSoft)
-                                            .lineSpacing(3)
-                                    }
-                                }
-
-                                if let recordedAudioFileURL {
-                                    Text("已录制文件：\(recordedAudioFileURL.lastPathComponent)")
-                                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                                        .foregroundStyle(PetPalTheme.ink)
-                                }
-
-                                HStack(spacing: 10) {
-                                    Button(isRecording ? "停止录音" : "开始录音") {
-                                        if isRecording {
-                                            stopRecording()
-                                        } else {
-                                            Task {
-                                                await startRecording()
-                                            }
-                                        }
-                                    }
-                                    .buttonStyle(PetPalSecondaryButtonStyle())
-
-                                    if recordingSeconds > 0 {
-                                        Text("\(recordingSeconds)s")
-                                            .font(.system(size: 16, weight: .black, design: .rounded))
-                                            .foregroundStyle(PetPalTheme.caramel)
-                                            .padding(.horizontal, 14)
-                                            .frame(height: 48)
-                                            .background(Color(hex: "E3F0E5").opacity(0.95))
-                                            .clipShape(Capsule())
-                                    }
-                                }
-                            }
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                                    .stroke(
-                                        voiceMode == "clone" || recordedAudioFileURL != nil
-                                            ? Color(hex: "EDA579")
-                                            : PetPalTheme.lineStrong,
-                                        style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
-                                    )
-                            )
-
-                            if let helperMessage {
-                                Text(helperMessage)
-                                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                                    .foregroundStyle(PetPalTheme.inkSoft)
-                                    .padding(.top, 2)
-                            }
-                        }
-
-                        if let errorMessage {
-                            Text(errorMessage)
-                                .font(.system(size: 13, weight: .bold, design: .rounded))
-                                .foregroundStyle(PetPalTheme.danger)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 140)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 130)
-                }
 
-                if isSubmitting {
-                    PetPalLoadingOverlay(
-                        title: "正在建立宠物档案...",
-                        subtitle: "我们会保存它的种类、人格和声音设定，接着进入今日上下文上传。"
-                    )
+                    if isSubmitting {
+                        PetPalLoadingOverlay(
+                            title: "正在建立宠物档案...",
+                            subtitle: "我们会保存参考照片、人格和声音设定，接着进入演示视频上传。"
+                        )
+                    }
                 }
             }
         }
         .safeAreaInset(edge: .bottom) {
-            VStack {
-                Button {
-                    Task {
-                        await createPet()
-                    }
-                } label: {
-                    Text("下一步，准备上传演示视频")
-                }
-                .buttonStyle(PetPalPrimaryButtonStyle())
-                .disabled(
-                    isSubmitting ||
-                    appStore.session.userId == nil ||
-                    petName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                )
+            bottomActionBar
+        }
+        .fileImporter(
+            isPresented: $isFileImporterPresented,
+            allowedContentTypes: [.image],
+            allowsMultipleSelection: false
+        ) { result in
+            Task {
+                await importReferencePhoto(from: result)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 12)
-            .padding(.bottom, 16)
-            .background(
-                LinearGradient(
-                    colors: [
-                        PetPalTheme.cream0.opacity(0),
-                        PetPalTheme.cream0.opacity(0.96),
-                        PetPalTheme.cream0
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
         }
         .onAppear {
             if let firstVoice = availableVoices.first?.id {
@@ -339,6 +127,7 @@ struct PetSetupView: View {
         }
         .onDisappear {
             cleanupRecordingResources()
+            cleanupReferencePhotoFile()
         }
     }
 
@@ -352,6 +141,508 @@ struct PetSetupView: View {
 
     private var selectedVoiceLabel: String {
         availableVoices.first(where: { $0.id == selectedVoiceKey })?.name ?? "奶呼噜"
+    }
+
+    private var defaultVoiceKey: String {
+        selectedSpecies.defaultVoiceKey
+    }
+
+    private var trimmedPetName: String {
+        petName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var referencePhotoResolvedURL: URL? {
+        appStore.apiClient.resolvedURL(for: referencePhotoRemotePath)
+    }
+
+    private var generatedAvatarResolvedURL: URL? {
+        appStore.apiClient.resolvedURL(for: generatedAvatarRemotePath)
+    }
+
+    private var confirmedAvatarResolvedURL: URL? {
+        appStore.apiClient.resolvedURL(for: confirmedAvatarRemotePath)
+    }
+
+    private var currentHeroImageURL: URL? {
+        confirmedAvatarResolvedURL ?? generatedAvatarResolvedURL ?? referencePhotoResolvedURL
+    }
+
+    private var heroTitle: String {
+        switch currentStep {
+        case 0:
+            return "先认识一下新伙伴"
+        case 1:
+            return "给它一点说话脾气"
+        default:
+            return "最后挑一个声音"
+        }
+    }
+
+    private var heroSubtitle: String {
+        switch currentStep {
+        case 0:
+            return "先上传它的参考照片，再补上名字和种类，我们会顺手生成一张可确认的卡通形象。"
+        case 1:
+            return "聊天人格可以跳过，默认会沿用现在这套傲娇又黏人的语气。"
+        default:
+            return "声音设定同样可以跳过，默认会自动带上该物种的推荐声线。"
+        }
+    }
+
+    private var canContinueFromStepOne: Bool {
+        !trimmedPetName.isEmpty &&
+        !referencePhotoRemotePath.isEmpty &&
+        avatarGenerationState != .generating &&
+        avatarGenerationState != .generated
+    }
+
+    private var primaryButtonTitle: String {
+        switch currentStep {
+        case 0:
+            return "下一步，设置聊天人格"
+        case 1:
+            return "下一步，设置声音"
+        default:
+            return "完成建档，继续上传视频"
+        }
+    }
+
+    private var isPrimaryButtonDisabled: Bool {
+        if isSubmitting {
+            return true
+        }
+
+        if currentStep == 0 {
+            return !canContinueFromStepOne
+        }
+
+        return false
+    }
+
+    private var bottomActionBar: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                if currentStep > 0 {
+                    Button("上一步") {
+                        withAnimation(.easeInOut(duration: 0.22)) {
+                            currentStep -= 1
+                        }
+                    }
+                    .buttonStyle(PetPalSecondaryButtonStyle())
+                    .frame(width: 118)
+                }
+
+                Button {
+                    handlePrimaryAction()
+                } label: {
+                    Text(primaryButtonTitle)
+                }
+                .buttonStyle(PetPalPrimaryButtonStyle())
+                .disabled(isPrimaryButtonDisabled)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 16)
+        .background(
+            LinearGradient(
+                colors: [
+                    PetPalTheme.cream0.opacity(0),
+                    PetPalTheme.cream0.opacity(0.96),
+                    PetPalTheme.cream0
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+    }
+
+    @ViewBuilder
+    private func stepOneContent(contentWidth: CGFloat, isCompactLayout: Bool) -> some View {
+        PetSetupStepHeader(
+            eyebrow: "基础信息",
+            title: "先上传目标宠物照片，再填写它的基本资料",
+            chipText: "Step 1"
+        )
+
+        VStack(alignment: .leading, spacing: 8) {
+            Text("参考照片")
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(PetPalTheme.inkSoft)
+
+            Text("这是后续锁定目标宠物的参考图，也是生成卡通形象的基础素材。")
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(PetPalTheme.inkSoft)
+                .lineSpacing(3)
+
+            Button {
+                isFileImporterPresented = true
+            } label: {
+                PetSetupImageCard(
+                    title: referencePhotoLocalURL == nil && referencePhotoRemotePath.isEmpty ? "点击上传宠物照片" : "重新上传参考照片",
+                    subtitle: referencePhotoLocalURL == nil && referencePhotoRemotePath.isEmpty
+                        ? "通过本地文件管理器选择 1 张正脸或特征清晰的照片"
+                        : "换图后会自动重新生成新的卡通形象",
+                    badgeText: "必选",
+                    localImageURL: referencePhotoLocalURL,
+                    remoteImageURL: referencePhotoResolvedURL,
+                    fallbackEmoji: selectedSpecies.emoji,
+                    height: isCompactLayout ? 220 : 250
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("打开文件管理器选择宠物参考照片")
+        }
+
+        avatarGenerationCard
+
+        VStack(alignment: .leading, spacing: 8) {
+            Text("名字")
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(PetPalTheme.inkSoft)
+
+            TextField("例如：发财、奶盖、奥利奥...", text: $petName)
+                .petPalTextFieldStyle()
+                .accessibilityLabel("宠物名字输入框")
+        }
+
+        VStack(alignment: .leading, spacing: 8) {
+            Text("宠物种类")
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(PetPalTheme.inkSoft)
+
+            LazyVGrid(columns: optionColumns(for: contentWidth), spacing: 12) {
+                ForEach(speciesOptions) { option in
+                    Button {
+                        species = option.id
+                    } label: {
+                        optionTile(
+                            emoji: option.emoji,
+                            title: option.label,
+                            subtitle: option.summary,
+                            isSelected: species == option.id
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var avatarGenerationCard: some View {
+        PetPalSurfaceCard {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .center, spacing: 8) {
+                        Text("卡通形象")
+                            .font(.system(size: 15, weight: .black, design: .rounded))
+                            .foregroundStyle(PetPalTheme.ink)
+
+                        Spacer(minLength: 8)
+
+                        PetPalCapsuleLabel(
+                            text: confirmedAvatarRemotePath.isEmpty ? "可确认" : "已确认",
+                            style: confirmedAvatarRemotePath.isEmpty ? .sticker : .soft
+                        )
+                    }
+
+                    Text(avatarStateDescription)
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(PetPalTheme.inkSoft)
+                        .lineSpacing(3)
+                }
+            }
+
+            switch avatarGenerationState {
+            case .idle:
+                PetSetupAvatarPlaceholder(
+                    title: "上传参考照片后，会自动生成一张头像候选图",
+                    subtitle: "你可以选择确认使用、重新生成，或者直接放弃卡通头像。"
+                )
+            case .generating:
+                PetSetupAvatarLoadingCard()
+            case .generated, .confirmed:
+                PetSetupImageCard(
+                    title: avatarGenerationState == .confirmed ? "当前已确认的宠物头像" : "新生成的卡通形象",
+                    subtitle: avatarGenerationState == .confirmed ? "后续聊天页和设置页会优先显示这张头像。" : "确认后会作为正式宠物头像使用。",
+                    badgeText: avatarGenerationState == .confirmed ? "已确认" : "待确认",
+                    localImageURL: nil,
+                    remoteImageURL: avatarGenerationState == .confirmed ? confirmedAvatarResolvedURL : generatedAvatarResolvedURL,
+                    fallbackEmoji: selectedSpecies.emoji,
+                    height: 220
+                )
+            case .failed:
+                PetSetupAvatarPlaceholder(
+                    title: "这次没有成功生成卡通形象",
+                    subtitle: avatarMessage?.ifEmpty("你可以重试，也可以直接保留参考照片继续后续建档。") ?? "你可以重试，也可以直接保留参考照片继续后续建档。"
+                )
+            }
+
+            if let avatarMessage, !avatarMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(avatarMessage)
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(avatarGenerationState == .failed ? PetPalTheme.warning : PetPalTheme.inkSoft)
+                    .lineSpacing(3)
+            }
+
+            switch avatarGenerationState {
+            case .generated:
+                HStack(spacing: 10) {
+                    Button("重试") {
+                        Task {
+                            await retryAvatarGeneration()
+                        }
+                    }
+                    .buttonStyle(PetPalSecondaryButtonStyle())
+
+                    Button("放弃") {
+                        discardGeneratedAvatar()
+                    }
+                    .buttonStyle(PetPalSecondaryButtonStyle())
+
+                    Button("确认使用") {
+                        confirmGeneratedAvatar()
+                    }
+                    .buttonStyle(PetPalPrimaryButtonStyle())
+                }
+            case .confirmed:
+                Button("基于当前照片重新生成") {
+                    Task {
+                        await retryAvatarGeneration()
+                    }
+                }
+                .buttonStyle(PetPalSecondaryButtonStyle())
+            case .failed:
+                HStack(spacing: 10) {
+                    Button("重试生成") {
+                        Task {
+                            await retryAvatarGeneration()
+                        }
+                    }
+                    .buttonStyle(PetPalSecondaryButtonStyle())
+
+                    Button("保留参考照片继续") {
+                        avatarGenerationState = .failed
+                    }
+                    .buttonStyle(PetPalSecondaryButtonStyle())
+                }
+            default:
+                EmptyView()
+            }
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(avatarBorderColor, lineWidth: 1.2)
+        )
+    }
+
+    @ViewBuilder
+    private func stepTwoContent(contentWidth: CGFloat, isCompactLayout: Bool) -> some View {
+        PetSetupStepHeader(
+            eyebrow: "聊天人格",
+            title: "它平时会怎么跟你说话？",
+            chipText: "Step 2",
+            onSkip: {
+                skipStyleStep()
+            }
+        )
+
+        Text("这一页可以跳过；如果不选，我们会沿用默认的“傲娇主子”风格。")
+            .font(.system(size: 13, weight: .medium, design: .rounded))
+            .foregroundStyle(PetPalTheme.inkSoft)
+            .lineSpacing(3)
+
+        LazyVGrid(columns: optionColumns(for: contentWidth), spacing: 12) {
+            ForEach(styleOptions) { option in
+                Button {
+                    style = option.id
+                } label: {
+                    optionTile(
+                        emoji: option.emoji,
+                        title: option.name,
+                        subtitle: option.desc,
+                        isSelected: style == option.id
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func stepThreeContent(contentWidth: CGFloat, isCompactLayout: Bool) -> some View {
+        PetSetupStepHeader(
+            eyebrow: "声音设定",
+            title: "先选一个像它的声音，再决定要不要复刻真实原声",
+            chipText: "Step 3",
+            onSkip: {
+                Task {
+                    await skipVoiceStep()
+                }
+            }
+        )
+
+        Text("这一步也可以直接跳过，我们会默认给它带上 \(selectedVoiceLabel) 这条推荐声线。")
+            .font(.system(size: 13, weight: .medium, design: .rounded))
+            .foregroundStyle(PetPalTheme.inkSoft)
+            .lineSpacing(3)
+
+        LazyVGrid(columns: optionColumns(for: contentWidth), spacing: 12) {
+            ForEach(availableVoices) { preset in
+                VStack(spacing: 10) {
+                    Button {
+                        voiceMode = "preset"
+                        selectedVoiceKey = preset.id
+                        helperMessage = nil
+                    } label: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .top, spacing: 8) {
+                                Text(preset.name)
+                                    .font(.system(size: 15, weight: .black, design: .rounded))
+                                    .foregroundStyle(PetPalTheme.ink)
+
+                                Spacer(minLength: 6)
+
+                                Text(preset.badge)
+                                    .font(.system(size: 11, weight: .black, design: .rounded))
+                                    .foregroundStyle(PetPalTheme.caramel)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 4)
+                                    .background(Color(hex: "FFE8CF").opacity(0.95))
+                                    .clipShape(Capsule())
+                            }
+
+                            Text(preset.tone)
+                                .font(.system(size: 12, weight: .black, design: .rounded))
+                                .foregroundStyle(Color(hex: "9E7760"))
+
+                            Text(preset.description)
+                                .font(.system(size: 13, weight: .medium, design: .rounded))
+                                .foregroundStyle(PetPalTheme.inkSoft)
+                                .multilineTextAlignment(.leading)
+                                .lineSpacing(3)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .background(tileFill(isSelected: voiceMode == "preset" && selectedVoiceKey == preset.id))
+                        .overlay(tileBorder(isSelected: voiceMode == "preset" && selectedVoiceKey == preset.id))
+                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button("试听一下") {
+                        helperMessage = "iOS Demo 暂未接入预设声音试听，但会保留和 web 一致的声音配置。"
+                    }
+                    .buttonStyle(PetPalSecondaryButtonStyle())
+                }
+            }
+        }
+
+        PetPalSurfaceCard {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .center, spacing: 8) {
+                        Text("复刻真实宠物声音")
+                            .font(.system(size: 15, weight: .black, design: .rounded))
+                            .foregroundStyle(PetPalTheme.ink)
+
+                        Spacer(minLength: 8)
+
+                        PetPalCapsuleLabel(text: "可选", style: .soft)
+                    }
+
+                    Text("录 3-6 秒叫声、呼噜声或日常撒娇声，我们会把它保存成专属声音样本。")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(PetPalTheme.inkSoft)
+                        .lineSpacing(3)
+                }
+            }
+
+            if let recordedAudioFileURL {
+                Text("已录制文件：\(recordedAudioFileURL.lastPathComponent)")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(PetPalTheme.ink)
+            }
+
+            HStack(spacing: 10) {
+                Button(isRecording ? "停止录音" : "开始录音") {
+                    if isRecording {
+                        stopRecording()
+                    } else {
+                        Task {
+                            await startRecording()
+                        }
+                    }
+                }
+                .buttonStyle(PetPalSecondaryButtonStyle())
+
+                if recordingSeconds > 0 {
+                    Text("\(recordingSeconds)s")
+                        .font(.system(size: 16, weight: .black, design: .rounded))
+                        .foregroundStyle(PetPalTheme.caramel)
+                        .padding(.horizontal, 14)
+                        .frame(height: 48)
+                        .background(Color(hex: "E3F0E5").opacity(0.95))
+                        .clipShape(Capsule())
+                }
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(
+                        voiceMode == "clone" || recordedAudioFileURL != nil
+                            ? Color(hex: "EDA579")
+                            : PetPalTheme.lineStrong,
+                        style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
+                    )
+            )
+
+            if let helperMessage {
+                Text(helperMessage)
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(PetPalTheme.inkSoft)
+                    .padding(.top, 2)
+            }
+        }
+    }
+
+    private func optionColumns(for contentWidth: CGFloat) -> [GridItem] {
+        if contentWidth < 360 {
+            return [GridItem(.flexible(), spacing: 12)]
+        }
+
+        return [
+            GridItem(.flexible(), spacing: 12),
+            GridItem(.flexible(), spacing: 12),
+        ]
+    }
+
+    @ViewBuilder
+    private func optionTile(
+        emoji: String,
+        title: String,
+        subtitle: String,
+        isSelected: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(emoji)
+                .font(.system(size: 28))
+
+            Text(title)
+                .font(.system(size: 15, weight: .black, design: .rounded))
+                .foregroundStyle(PetPalTheme.ink)
+
+            Text(subtitle)
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(PetPalTheme.inkSoft)
+                .multilineTextAlignment(.leading)
+                .lineSpacing(3)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(tileFill(isSelected: isSelected))
+        .overlay(tileBorder(isSelected: isSelected))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
     @ViewBuilder
@@ -375,11 +666,194 @@ struct PetSetupView: View {
             )
     }
 
+    private var avatarBorderColor: Color {
+        switch avatarGenerationState {
+        case .failed:
+            return Color(hex: "E4C18A")
+        case .generated, .confirmed:
+            return Color(hex: "EDA579")
+        case .generating:
+            return Color(hex: "E7C8B2")
+        case .idle:
+            return PetPalTheme.line.opacity(0.8)
+        }
+    }
+
+    private var avatarStateDescription: String {
+        switch avatarGenerationState {
+        case .idle:
+            return "参考照片上传后会自动生成 1 张可确认的动漫卡通形象。"
+        case .generating:
+            return "正在根据参考照片生成卡通形象，请稍等片刻。"
+        case .generated:
+            return "这张头像还没确认，确认或放弃后才能进入下一步。"
+        case .confirmed:
+            return "这张头像已经确认，后续会在聊天页和设置页优先展示。"
+        case .failed:
+            return "参考照片已经保存为目标宠物参考图，你可以稍后重试头像生成。"
+        }
+    }
+
+    private func handlePrimaryAction() {
+        errorMessage = nil
+
+        switch currentStep {
+        case 0:
+            withAnimation(.easeInOut(duration: 0.22)) {
+                currentStep = 1
+            }
+        case 1:
+            withAnimation(.easeInOut(duration: 0.22)) {
+                currentStep = 2
+            }
+        default:
+            Task {
+                await createPet()
+            }
+        }
+    }
+
+    private func skipStyleStep() {
+        style = "tsundere"
+        withAnimation(.easeInOut(duration: 0.22)) {
+            currentStep = 2
+        }
+    }
+
+    private func skipVoiceStep() async {
+        voiceMode = "preset"
+        selectedVoiceKey = defaultVoiceKey
+        helperMessage = nil
+        cleanupRecordingResources()
+        cleanupRecordedAudioFile()
+        await createPet()
+    }
+
+    private func confirmGeneratedAvatar() {
+        guard !generatedAvatarRemotePath.isEmpty else { return }
+        confirmedAvatarRemotePath = generatedAvatarRemotePath
+        avatarGenerationState = .confirmed
+        avatarMessage = "卡通形象已确认，后续会作为宠物头像使用。"
+    }
+
+    private func discardGeneratedAvatar() {
+        generatedAvatarRemotePath = ""
+        confirmedAvatarRemotePath = ""
+        avatarGenerationState = .failed
+        avatarMessage = "本次卡通形象已放弃，但参考照片仍会作为目标宠物识别参考图。"
+    }
+
+    private func retryAvatarGeneration() async {
+        guard let referencePhotoLocalURL else {
+            avatarGenerationState = .failed
+            avatarMessage = "找不到本地参考照片，请重新上传。"
+            return
+        }
+
+        await generateAvatar(from: referencePhotoLocalURL)
+    }
+
+    private func importReferencePhoto(from result: Result<[URL], Error>) async {
+        errorMessage = nil
+
+        let urls: [URL]
+        do {
+            urls = try result.get()
+        } catch {
+            errorMessage = "无法读取你选择的图片，请重新试一次。"
+            return
+        }
+
+        guard let sourceURL = urls.first else { return }
+
+        do {
+            let copiedURL = try copyImportedReferencePhoto(from: sourceURL)
+            cleanupReferencePhotoFile()
+            referencePhotoLocalURL = copiedURL
+            referencePhotoRemotePath = ""
+            generatedAvatarRemotePath = ""
+            confirmedAvatarRemotePath = ""
+            avatarGenerationState = .generating
+            avatarMessage = "参考照片已接收，正在生成卡通形象..."
+            await generateAvatar(from: copiedURL)
+        } catch {
+            errorMessage = "导入参考照片失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func generateAvatar(from localURL: URL) async {
+        avatarGenerationState = .generating
+        avatarMessage = "正在根据这张照片生成卡通形象..."
+
+        do {
+            let response = try await appStore.apiClient.generatePetAvatar(
+                species: species,
+                imageFileURL: localURL
+            )
+            referencePhotoRemotePath = response.photoURL
+            generatedAvatarRemotePath = response.avatarURL
+            confirmedAvatarRemotePath = ""
+
+            if response.avatarURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                avatarGenerationState = .failed
+                avatarMessage = response.generationError?.ifEmpty("卡通形象暂时生成失败，但参考照片已经保存。") ?? "卡通形象暂时生成失败，但参考照片已经保存。"
+            } else {
+                avatarGenerationState = .generated
+                avatarMessage = "已生成 1 张卡通形象，请确认使用或放弃。"
+            }
+        } catch {
+            avatarGenerationState = .failed
+            avatarMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func copyImportedReferencePhoto(from sourceURL: URL) throws -> URL {
+        let startedAccessing = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if startedAccessing {
+                sourceURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let ext = sourceURL.pathExtension.isEmpty ? "jpg" : sourceURL.pathExtension
+        let destinationURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(ext)
+
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            try FileManager.default.removeItem(at: destinationURL)
+        }
+
+        try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+        return destinationURL
+    }
+
+    private func cleanupReferencePhotoFile() {
+        guard let referencePhotoLocalURL else { return }
+        try? FileManager.default.removeItem(at: referencePhotoLocalURL)
+        self.referencePhotoLocalURL = nil
+    }
+
     private func createPet() async {
         guard let userID = appStore.session.userId else { return }
 
-        let trimmedName = petName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else { return }
+        if trimmedPetName.isEmpty {
+            errorMessage = "请先填写宠物名字。"
+            currentStep = 0
+            return
+        }
+
+        if referencePhotoRemotePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            errorMessage = "请先上传目标宠物参考照片。"
+            currentStep = 0
+            return
+        }
+
+        if avatarGenerationState == .generated {
+            errorMessage = "请先确认卡通形象，或者放弃这次生成结果。"
+            currentStep = 0
+            return
+        }
 
         if voiceMode == "clone", recordedAudioFileURL == nil {
             errorMessage = "请先录一段几秒钟的宠物声音。"
@@ -392,19 +866,21 @@ struct PetSetupView: View {
         do {
             let request = CreatePetRequest(
                 userID: userID,
-                name: trimmedName,
+                name: trimmedPetName,
                 species: species,
+                photoURL: referencePhotoRemotePath,
+                avatarURL: confirmedAvatarRemotePath,
                 languageStyle: style,
                 voiceType: voiceMode == "clone" ? "clone" : "preset",
                 voiceKey: voiceMode == "clone" ? "custom-clone" : selectedVoiceKey,
-                voiceLabel: voiceMode == "clone" ? "\(trimmedName)原声" : selectedVoiceLabel
+                voiceLabel: voiceMode == "clone" ? "\(trimmedPetName)原声" : selectedVoiceLabel
             )
 
             let response = try await appStore.apiClient.createPet(request)
 
             appStore.applyCreatedPet(
                 response: response,
-                name: trimmedName,
+                name: trimmedPetName,
                 species: species,
                 style: style
             )
@@ -412,7 +888,7 @@ struct PetSetupView: View {
             if voiceMode == "clone", let recordedAudioFileURL {
                 let uploadResponse = try await appStore.apiClient.uploadPetVoiceSample(
                     petID: response.id,
-                    label: "\(trimmedName)原声",
+                    label: "\(trimmedPetName)原声",
                     audioFileURL: recordedAudioFileURL
                 )
                 appStore.applyUploadedVoiceSample(uploadResponse)
@@ -547,6 +1023,222 @@ struct PetSetupView: View {
         try? FileManager.default.removeItem(at: recordedAudioFileURL)
         self.recordedAudioFileURL = nil
     }
+}
+
+private struct PetSetupStepHeader: View {
+    let eyebrow: String
+    let title: String
+    let chipText: String
+    var onSkip: (() -> Void)? = nil
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(eyebrow)
+                    .font(.system(size: 12, weight: .black, design: .rounded))
+                    .foregroundStyle(PetPalTheme.caramel)
+                    .textCase(.uppercase)
+                    .tracking(1.2)
+
+                Text(title)
+                    .font(.system(size: 18, weight: .black, design: .rounded))
+                    .foregroundStyle(PetPalTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 8)
+
+            VStack(alignment: .trailing, spacing: 8) {
+                PetPalCapsuleLabel(text: chipText, style: .sticker)
+
+                if let onSkip {
+                    Button("跳过") {
+                        onSkip()
+                    }
+                    .buttonStyle(PetPalSmallGhostButtonStyle())
+                }
+            }
+        }
+    }
+}
+
+private struct PetSetupImageCard: View {
+    let title: String
+    let subtitle: String
+    let badgeText: String
+    let localImageURL: URL?
+    let remoteImageURL: URL?
+    let fallbackEmoji: String
+    let height: CGFloat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .black, design: .rounded))
+                        .foregroundStyle(PetPalTheme.ink)
+
+                    Text(subtitle)
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(PetPalTheme.inkSoft)
+                        .lineSpacing(3)
+                }
+
+                Spacer(minLength: 8)
+
+                PetPalCapsuleLabel(text: badgeText, style: .hero)
+            }
+
+            content
+                .frame(maxWidth: .infinity)
+                .frame(height: height)
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(PetPalTheme.line.opacity(0.8), lineWidth: 1)
+                )
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(hex: "FFF8EE").opacity(0.96))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(PetPalTheme.line.opacity(0.75), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let localImageURL, let image = UIImage(contentsOfFile: localImageURL.path) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+        } else if let remoteImageURL {
+            AsyncImage(url: remoteImageURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                case .empty:
+                    placeholder
+                case .failure:
+                    placeholder
+                @unknown default:
+                    placeholder
+                }
+            }
+        } else {
+            placeholder
+        }
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(hex: "FFF4E5"), Color(hex: "FFE8D6")],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            VStack(spacing: 8) {
+                Text(fallbackEmoji)
+                    .font(.system(size: 42))
+
+                Text("等待图片")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(PetPalTheme.inkSoft)
+            }
+        }
+    }
+}
+
+private struct PetSetupAvatarPlaceholder: View {
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(hex: "FFF3E5"), Color(hex: "FFE2CC")],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(height: 180)
+                .overlay(
+                    VStack(spacing: 10) {
+                        Text("🎨")
+                            .font(.system(size: 34))
+
+                        Text(title)
+                            .font(.system(size: 15, weight: .black, design: .rounded))
+                            .foregroundStyle(PetPalTheme.ink)
+                            .multilineTextAlignment(.center)
+
+                        Text(subtitle)
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundStyle(PetPalTheme.inkSoft)
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(3)
+                            .padding(.horizontal, 20)
+                    }
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(PetPalTheme.lineStrong, style: StrokeStyle(lineWidth: 1.4, dash: [6, 4]))
+                )
+        }
+    }
+}
+
+private struct PetSetupAvatarLoadingCard: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 24, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [Color(hex: "FFF3E8"), Color(hex: "FFE8DA")],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .frame(height: 180)
+            .overlay {
+                VStack(spacing: 12) {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(Color(hex: "EF986A"))
+
+                    Text("正在生成动漫卡通形象")
+                        .font(.system(size: 16, weight: .black, design: .rounded))
+                        .foregroundStyle(PetPalTheme.ink)
+
+                    Text("生成期间页面会停留在当前步骤，完成后你可以重试、确认或放弃。")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(PetPalTheme.inkSoft)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                        .padding(.horizontal, 18)
+                }
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color(hex: "EFC0A5"), lineWidth: 1.2)
+            )
+    }
+}
+
+private enum AvatarGenerationState: Equatable {
+    case idle
+    case generating
+    case generated
+    case confirmed
+    case failed
 }
 
 private struct SpeciesOption: Identifiable {

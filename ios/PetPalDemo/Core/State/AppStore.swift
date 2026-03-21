@@ -34,6 +34,8 @@ final class AppStore: ObservableObject {
         session.petId = response.id
         session.petName = name
         session.petSpecies = species
+        session.petPhotoURL = response.photoURL
+        session.petAvatarURL = response.avatarURL
         session.languageStyle = style
         session.voiceType = response.voiceType
         session.voiceKey = response.voiceKey
@@ -50,6 +52,7 @@ final class AppStore: ObservableObject {
 
     func applyUploadedDemoVideo(_ response: DemoVideoUploadResponse) {
         session.cameraId = response.cameraID
+        session.cameraName = response.cameraName
         session.demoVideoName = response.demoVideoName
         session.demoVideoURL = response.demoVideoURL
         session.setupComplete = true
