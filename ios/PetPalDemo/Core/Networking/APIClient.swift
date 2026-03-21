@@ -52,7 +52,8 @@ final class APIClient {
     func createUser(nickname: String, avatarURL: String = "") async throws -> CreateUserResponse {
         try await send(
             endpoint: Endpoint(path: "/api/user", method: .post),
-            body: CreateUserRequest(nickname: nickname, avatarURL: avatarURL)
+            body: CreateUserRequest(nickname: nickname, avatarURL: avatarURL),
+            timeoutInterval: 5
         )
     }
 
@@ -60,6 +61,24 @@ final class APIClient {
         try await send(
             endpoint: Endpoint(path: "/api/pet", method: .post),
             body: requestBody
+        )
+    }
+
+    func generatePetAvatar(
+        species: String,
+        imageFileURL: URL
+    ) async throws -> GeneratedPetAvatarResponse {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        let body = try MultipartFormDataBuilder.makeBody(
+            fields: [MultipartFormDataField(name: "species", value: species)],
+            files: [MultipartFormDataFile(fieldName: "image", fileURL: imageFileURL)],
+            boundary: boundary
+        )
+
+        return try await upload(
+            endpoint: Endpoint(path: "/api/pet/avatar/generate", method: .post),
+            body: body,
+            contentType: "multipart/form-data; boundary=\(boundary)"
         )
     }
 
@@ -205,7 +224,8 @@ final class APIClient {
 
     private func send<Response: Decodable & Sendable, Body: Encodable & Sendable>(
         endpoint: Endpoint,
-        body: Body
+        body: Body,
+        timeoutInterval: TimeInterval? = nil
     ) async throws -> Response {
         let requestBody: Data
         do {
@@ -214,7 +234,7 @@ final class APIClient {
             throw APIError.encodingFailed(error.localizedDescription)
         }
 
-        var request = try makeRequest(for: endpoint)
+        var request = try makeRequest(for: endpoint, timeoutInterval: timeoutInterval)
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         return try await execute(request, uploadBody: requestBody)
     }
@@ -229,11 +249,14 @@ final class APIClient {
         return try await execute(request, uploadBody: body)
     }
 
-    private func makeRequest(for endpoint: Endpoint) throws -> URLRequest {
+    private func makeRequest(
+        for endpoint: Endpoint,
+        timeoutInterval: TimeInterval? = nil
+    ) throws -> URLRequest {
         let url = try endpoint.url(relativeTo: baseURL)
         var request = URLRequest(url: url)
         request.httpMethod = endpoint.method.rawValue
-        request.timeoutInterval = 30
+        request.timeoutInterval = timeoutInterval ?? 30
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
@@ -285,7 +308,7 @@ final class APIClient {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 300
-        configuration.waitsForConnectivity = true
+        configuration.waitsForConnectivity = false
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.httpAdditionalHeaders = [
             "Accept": "application/json",
