@@ -4,41 +4,35 @@ struct WelcomeView: View {
     @EnvironmentObject private var appStore: AppStore
     @State private var isSubmitting = false
     @State private var errorMessage: String?
-    @State private var isFloating = false
     private let onboardingSteps: [OnboardingStep] = [
         .init(
             number: "1",
             symbolName: "pawprint.fill",
             title: "添加爱宠",
-            subtitle: "设定宠物名字、品种和专属性格。"
+            subtitle: "名字·品种"
         ),
         .init(
             number: "2",
             symbolName: "video.fill",
-            title: "添加摄像头",
-            subtitle: "搜索并绑定家庭摄像头，接入今天的实时画面。"
+            title: "连接摄像头",
+            subtitle: "绑定视频"
         ),
         .init(
             number: "3",
             symbolName: "message.fill",
-            title: "与爱宠聊天",
-            subtitle: "用它自己的口吻，告诉你今天发生了什么。"
+            title: "开始聊天",
+            subtitle: "宠物对话"
         ),
     ]
 
     var body: some View {
         PetPalShell(alignment: .center) {
             VStack(spacing: 0) {
-                Spacer(minLength: 40)
+                Spacer(minLength: 24)
 
                 VStack(spacing: 0) {
                     welcomeMark
-                        .offset(y: isFloating ? -10 : 0)
-                        .animation(.easeInOut(duration: 3.4).repeatForever(autoreverses: true), value: isFloating)
-                        .padding(.bottom, 12)
-
-                    PetPalCapsuleLabel(text: "Warm companion OS", style: .hero)
-                        .padding(.bottom, 12)
+                        .padding(.bottom, 10)
 
                     Text("PetPal")
                         .font(.system(size: 40, weight: .black, design: .rounded))
@@ -47,11 +41,11 @@ struct WelcomeView: View {
                     Text("每一帧，都是它想对你说的话")
                         .font(.system(size: 15, weight: .medium, design: .rounded))
                         .foregroundStyle(PetPalTheme.inkSoft)
-                        .padding(.top, 10)
-                        .padding(.bottom, 32)
+                        .padding(.top, 8)
+                        .padding(.bottom, 22)
 
                     stepsSection
-                    .padding(.bottom, 24)
+                        .padding(.bottom, 18)
 
                     Button {
                         Task {
@@ -82,11 +76,8 @@ struct WelcomeView: View {
                 }
                 .padding(.horizontal, 24)
 
-                Spacer(minLength: 40)
+                Spacer(minLength: 24)
             }
-        }
-        .onAppear {
-            isFloating = true
         }
     }
 
@@ -129,57 +120,52 @@ struct WelcomeView: View {
     }
 
     private var stepsSection: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                ForEach(onboardingSteps) { step in
-                    stepCard(step)
-                }
+        HStack(alignment: .top, spacing: 10) {
+            ForEach(onboardingSteps) { step in
+                stepCard(step)
             }
-            .padding(.horizontal, 2)
         }
         .frame(maxWidth: 360)
-        .scrollClipDisabled()
     }
 
     private func stepCard(_ step: OnboardingStep) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
                 stepBadge(step.number)
 
-                Spacer(minLength: 10)
+                Spacer(minLength: 6)
 
                 ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(Color(hex: "FFF3E4"))
-                        .frame(width: 46, height: 46)
+                        .frame(width: 34, height: 34)
 
                     Image(systemName: step.symbolName)
-                        .font(.system(size: 19, weight: .black))
+                        .font(.system(size: 14, weight: .black))
                         .foregroundStyle(PetPalTheme.ink)
                 }
             }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(step.title)
-                    .font(.system(size: 16, weight: .black, design: .rounded))
+                    .font(.system(size: 14, weight: .black, design: .rounded))
                     .foregroundStyle(PetPalTheme.ink)
+                    .lineLimit(2)
 
                 Text(step.subtitle)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(PetPalTheme.inkSoft)
-                    .lineSpacing(2)
-                    .lineLimit(3)
+                    .lineLimit(1)
             }
         }
-        .frame(width: 196, alignment: .topLeading)
-        .frame(minHeight: 152, alignment: .topLeading)
-        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
+        .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(Color.white.opacity(0.9))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(PetPalTheme.line.opacity(0.8), lineWidth: 1)
         )
     }
@@ -193,10 +179,10 @@ struct WelcomeView: View {
                     endPoint: .bottomTrailing
                 )
             )
-            .frame(width: 34, height: 34)
+            .frame(width: 28, height: 28)
             .overlay(
                 Text(number)
-                    .font(.system(size: 14, weight: .black, design: .rounded))
+                    .font(.system(size: 12, weight: .black, design: .rounded))
                     .foregroundStyle(.white)
             )
     }
