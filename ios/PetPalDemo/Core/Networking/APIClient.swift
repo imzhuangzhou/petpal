@@ -1,6 +1,20 @@
 import Foundation
 
 final class APIClient {
+    struct VoiceSampleUploadResponse: Decodable, Sendable {
+        let voiceType: String
+        let voiceKey: String
+        let voiceLabel: String
+        let voiceSampleURL: String
+
+        enum CodingKeys: String, CodingKey {
+            case voiceType = "voice_type"
+            case voiceKey = "voice_key"
+            case voiceLabel = "voice_label"
+            case voiceSampleURL = "voice_sample_url"
+        }
+    }
+
     let baseURL: URL
     private let session: URLSession
     private let encoder: JSONEncoder
@@ -69,6 +83,25 @@ final class APIClient {
 
         return try await upload(
             endpoint: Endpoint(path: "/api/demo-video", method: .post),
+            body: body,
+            contentType: "multipart/form-data; boundary=\(boundary)"
+        )
+    }
+
+    func uploadPetVoiceSample(
+        petID: Int,
+        label: String,
+        audioFileURL: URL
+    ) async throws -> VoiceSampleUploadResponse {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        let body = try MultipartFormDataBuilder.makeBody(
+            fields: [MultipartFormDataField(name: "label", value: label)],
+            files: [MultipartFormDataFile(fieldName: "audio", fileURL: audioFileURL)],
+            boundary: boundary
+        )
+
+        return try await upload(
+            endpoint: Endpoint(path: "/api/pet/\(petID)/voice/sample", method: .post),
             body: body,
             contentType: "multipart/form-data; boundary=\(boundary)"
         )

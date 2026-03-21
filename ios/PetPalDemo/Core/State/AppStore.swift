@@ -38,6 +38,14 @@ final class AppStore: ObservableObject {
         session.voiceType = response.voiceType
         session.voiceKey = response.voiceKey
         session.voiceLabel = response.voiceLabel
+        session.voiceSampleURL = ""
+    }
+
+    func applyUploadedVoiceSample(_ response: APIClient.VoiceSampleUploadResponse) {
+        session.voiceType = response.voiceType
+        session.voiceKey = response.voiceKey
+        session.voiceLabel = response.voiceLabel
+        session.voiceSampleURL = response.voiceSampleURL
     }
 
     func applyUploadedDemoVideo(_ response: DemoVideoUploadResponse) {

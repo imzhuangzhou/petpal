@@ -5,47 +5,75 @@ struct WelcomeView: View {
     @State private var nickname = ""
     @State private var isSubmitting = false
     @State private var errorMessage: String?
+    @State private var isFloating = false
 
     var body: some View {
-        Form {
-            Section("开始") {
-                Text("先创建主人昵称，再继续进入宠物创建流程。")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+        PetPalShell(alignment: .center) {
+            VStack(spacing: 0) {
+                Spacer(minLength: 40)
 
-                TextField("你的昵称", text: $nickname)
-                    .textInputAutocapitalization(.never)
-                    .accessibilityLabel("昵称输入框")
+                VStack(spacing: 0) {
+                    Text("🐾")
+                        .font(.system(size: 78))
+                        .offset(y: isFloating ? -10 : 0)
+                        .animation(.easeInOut(duration: 3.4).repeatForever(autoreverses: true), value: isFloating)
+                        .padding(.bottom, 12)
 
-                Button {
-                    Task {
-                        await createUser()
+                    PetPalCapsuleLabel(text: "Warm companion OS", style: .hero)
+                        .padding(.bottom, 12)
+
+                    Text("PetPal")
+                        .font(.system(size: 40, weight: .black, design: .rounded))
+                        .foregroundStyle(PetPalTheme.ink)
+
+                    Text("每一帧，都是它想对你说的话")
+                        .font(.system(size: 15, weight: .medium, design: .rounded))
+                        .foregroundStyle(PetPalTheme.inkSoft)
+                        .padding(.top, 10)
+                        .padding(.bottom, 28)
+
+                    VStack(spacing: 14) {
+                        TextField("怎么称呼你？(你的昵称)", text: $nickname)
+                            .textInputAutocapitalization(.never)
+                            .petPalTextFieldStyle()
+                            .accessibilityLabel("昵称输入框")
+
+                        Button {
+                            Task {
+                                await createUser()
+                            }
+                        } label: {
+                            Group {
+                                if isSubmitting {
+                                    ProgressView()
+                                        .tint(.white)
+                                } else {
+                                    Text("开始我们的故事")
+                                }
+                            }
+                        }
+                        .buttonStyle(PetPalPrimaryButtonStyle())
+                        .disabled(isSubmitting || nickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityHint("创建主人资料并进入宠物创建页")
+
                     }
-                } label: {
-                    if isSubmitting {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        Text("继续")
-                            .frame(maxWidth: .infinity)
+                    .frame(maxWidth: 360)
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(PetPalTheme.danger)
+                            .padding(.top, 16)
                     }
                 }
-                .disabled(isSubmitting || nickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .buttonStyle(.borderedProminent)
-                .accessibilityHint("创建主人资料并进入宠物创建页")
+                .padding(.horizontal, 24)
 
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                }
-            }
-
-            Section("后端配置") {
-                LabeledContent("API Base URL", value: appStore.apiClient.baseURL.absoluteString)
+                Spacer(minLength: 40)
             }
         }
-        .navigationTitle("Welcome")
+        .onAppear {
+            isFloating = true
+        }
     }
 
     private func createUser() async {

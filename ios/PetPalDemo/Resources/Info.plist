@@ -20,6 +20,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>需要访问麦克风来录制宠物叫声并生成真实宠物原声样本。</string>
 	<key>API_BASE_URL</key>
 	<string>http://localhost:8000</string>
 </dict>

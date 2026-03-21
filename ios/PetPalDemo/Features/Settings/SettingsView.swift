@@ -1,5 +1,6 @@
-import SwiftUI
+import AVKit
 import PhotosUI
+import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var appStore: AppStore
@@ -10,76 +11,185 @@ struct SettingsView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        Form {
-            Section("当前会话") {
-                LabeledContent("用户 ID", value: appStore.session.userId.map(String.init) ?? "-")
-                LabeledContent("宠物 ID", value: appStore.session.petId.map(String.init) ?? "-")
-                LabeledContent("摄像头 ID", value: appStore.session.cameraId.map(String.init) ?? "-")
-                LabeledContent("视频名", value: appStore.session.demoVideoName)
-            }
+        PetPalShell {
+            ZStack {
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 16) {
+                        HStack(spacing: 12) {
+                            Button {
+                                dismiss()
+                            } label: {
+                                Text("← 返回")
+                            }
+                            .buttonStyle(PetPalSmallGhostButtonStyle())
 
-            Section("替换演示视频") {
-                PhotosPicker(
-                    selection: $selectedItem,
-                    matching: .videos,
-                    photoLibrary: .shared()
-                ) {
-                    Label(selectedVideo == nil ? "选择新视频" : "重新选择视频", systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
-                }
-                .onChange(of: selectedItem) {
-                    Task {
-                        await loadSelectedVideo()
+                            Spacer(minLength: 0)
+
+                            Text("设置")
+                                .font(.system(size: 18, weight: .black, design: .rounded))
+                                .foregroundStyle(PetPalTheme.ink)
+
+                            Spacer(minLength: 0)
+
+                            Color.clear
+                                .frame(width: 72, height: 1)
+                        }
+                        .padding(.top, 16)
+
+                        PetPalHeroCard(
+                            badge: "Profile",
+                            stamp: petAvatar,
+                            title: appStore.session.petName.ifEmpty("PetPal"),
+                            subtitle: "主人是 \(appStore.session.nickname.ifEmpty("你"))，当前宠物种类为 \(appStore.session.petSpecies == "dog" ? "狗狗" : "猫咪")。"
+                        )
+
+                        PetPalPanelCard {
+                            PetPalSectionHeader(
+                                eyebrow: "声音配置",
+                                title: "当前聊天会使用的宠物声音画像",
+                                chipText: nil
+                            )
+
+                            PetPalSurfaceCard {
+                                PetPalInfoRow(
+                                    title: "当前模式",
+                                    value: appStore.session.voiceType == "clone" ? "真实宠物原声" : "预设宠物声音"
+                                )
+                                PetPalInfoRow(
+                                    title: "声音名称",
+                                    value: appStore.session.voiceLabel.ifEmpty("未设置")
+                                )
+
+                                if !appStore.session.voiceSampleURL.isEmpty {
+                                    Divider()
+                                        .overlay(PetPalTheme.line.opacity(0.8))
+
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("已保存的真实宠物原声")
+                                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                                            .foregroundStyle(PetPalTheme.ink)
+
+                                        Text(appStore.apiClient.resolvedURL(for: appStore.session.voiceSampleURL)?.absoluteString ?? appStore.session.voiceSampleURL)
+                                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                                            .foregroundStyle(PetPalTheme.inkSoft)
+                                            .lineLimit(2)
+                                    }
+                                }
+                            }
+                        }
+
+                        PetPalPanelCard {
+                            PetPalSectionHeader(
+                                eyebrow: "视频上下文",
+                                title: "随时替换今天的演示视频",
+                                chipText: nil
+                            )
+
+                            PetPalSurfaceCard {
+                                PetPalInfoRow(
+                                    title: "当前视频",
+                                    value: appStore.session.demoVideoName.ifEmpty("未上传")
+                                )
+
+                                if let selectedVideo {
+                                    Text("待上传文件：\(selectedVideo.url.lastPathComponent)")
+                                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                                        .foregroundStyle(PetPalTheme.ink)
+                                }
+
+                                if let previewURL = selectedPreviewURL {
+                                    VideoPlayer(player: AVPlayer(url: previewURL))
+                                        .frame(height: 220)
+                                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                }
+
+                                PhotosPicker(
+                                    selection: $selectedItem,
+                                    matching: .videos,
+                                    photoLibrary: .shared()
+                                ) {
+                                    Text(selectedVideo == nil ? "选择新视频" : "重新选择视频")
+                                }
+                                .buttonStyle(PetPalSecondaryButtonStyle())
+                                .onChange(of: selectedItem) {
+                                    Task {
+                                        await loadSelectedVideo()
+                                    }
+                                }
+
+                                Button {
+                                    Task {
+                                        await replaceVideo()
+                                    }
+                                } label: {
+                                    Group {
+                                        if isUploading {
+                                            ProgressView()
+                                                .tint(PetPalTheme.ink)
+                                        } else {
+                                            Text("上传替换视频")
+                                        }
+                                    }
+                                }
+                                .buttonStyle(PetPalSecondaryButtonStyle())
+                                .disabled(
+                                    isUploading ||
+                                    appStore.session.userId == nil ||
+                                    appStore.session.petId == nil ||
+                                    selectedVideo == nil
+                                )
+
+                                if let errorMessage {
+                                    Text(errorMessage)
+                                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                                        .foregroundStyle(PetPalTheme.danger)
+                                }
+                            }
+                        }
+
+                        PetPalPanelCard {
+                            PetPalSectionHeader(
+                                eyebrow: "通用",
+                                title: "重新开始配置",
+                                chipText: nil
+                            )
+
+                            Text("如果你想重新创建宠物档案、重新录声音或重新绑定一段上下文视频，可以从这里回到起点。")
+                                .font(.system(size: 13, weight: .medium, design: .rounded))
+                                .foregroundStyle(PetPalTheme.inkSoft)
+                                .lineSpacing(3)
+
+                            Button("重置所有应用数据", role: .destructive) {
+                                appStore.reset()
+                                dismiss()
+                            }
+                            .buttonStyle(PetPalDangerButtonStyle())
+                        }
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 32)
                 }
 
-                if let selectedVideo {
-                    LabeledContent("待上传文件", value: selectedVideo.url.lastPathComponent)
-                }
-
-                Button {
-                    Task {
-                        await replaceVideo()
-                    }
-                } label: {
-                    if isUploading {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        Text("上传替换视频")
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .disabled(
-                    isUploading ||
-                    appStore.session.userId == nil ||
-                    appStore.session.petId == nil ||
-                    selectedVideo == nil
-                )
-                .buttonStyle(.bordered)
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                }
-            }
-
-            Section("环境") {
-                LabeledContent("API Base URL", value: appStore.apiClient.baseURL.absoluteString)
-                LabeledContent(
-                    "当前视频 URL",
-                    value: appStore.apiClient.resolvedURL(for: appStore.session.demoVideoURL)?.absoluteString ?? "-"
-                )
-            }
-
-            Section("操作") {
-                Button("重置本地演示状态", role: .destructive) {
-                    appStore.reset()
-                    dismiss()
+                if isUploading {
+                    PetPalLoadingOverlay(
+                        title: "正在替换演示视频...",
+                        subtitle: "新的上下文会在上传完成后立即生效。"
+                    )
                 }
             }
         }
-        .navigationTitle("设置")
+    }
+
+    private var petAvatar: String {
+        appStore.session.petSpecies == "dog" ? "🐶" : "🐱"
+    }
+
+    private var selectedPreviewURL: URL? {
+        if let selectedVideo {
+            return selectedVideo.url
+        }
+
+        return appStore.apiClient.resolvedURL(for: appStore.session.demoVideoURL)
     }
 
     private func loadSelectedVideo() async {
@@ -121,10 +231,32 @@ struct SettingsView: View {
                 )
             )
             appStore.applyUploadedDemoVideo(response)
+            self.selectedVideo = nil
         } catch {
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
 
         isUploading = false
+    }
+}
+
+private struct PetPalDangerButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 15, weight: .black, design: .rounded))
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 50)
+            .background(
+                LinearGradient(
+                    colors: [Color(hex: "D78172"), Color(hex: "C66B5F")],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .opacity(configuration.isPressed ? 0.92 : 1)
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeOut(duration: 0.18), value: configuration.isPressed)
     }
 }
