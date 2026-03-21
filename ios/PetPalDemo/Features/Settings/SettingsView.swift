@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var selectedItem: PhotosPickerItem?
     @State private var selectedVideo: PickedVideo?
     @State private var isUploading = false
+    @State private var isShowingResetConfirmation = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -53,29 +54,9 @@ struct SettingsView: View {
 
                             PetPalSurfaceCard {
                                 PetPalInfoRow(
-                                    title: "当前模式",
-                                    value: appStore.session.voiceType == "clone" ? "真实宠物原声" : "预设宠物声音"
+                                    title: "当前声音",
+                                    value: currentVoiceDisplayName
                                 )
-                                PetPalInfoRow(
-                                    title: "声音名称",
-                                    value: appStore.session.voiceLabel.ifEmpty("未设置")
-                                )
-
-                                if !appStore.session.voiceSampleURL.isEmpty {
-                                    Divider()
-                                        .overlay(PetPalTheme.line.opacity(0.8))
-
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        Text("已保存的真实宠物原声")
-                                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                                            .foregroundStyle(PetPalTheme.ink)
-
-                                        Text(appStore.apiClient.resolvedURL(for: appStore.session.voiceSampleURL)?.absoluteString ?? appStore.session.voiceSampleURL)
-                                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                                            .foregroundStyle(PetPalTheme.inkSoft)
-                                            .lineLimit(2)
-                                    }
-                                }
                             }
                         }
 
@@ -160,14 +141,8 @@ struct SettingsView: View {
                                 chipText: nil
                             )
 
-                            Text("如果你想重新创建宠物档案、重新录声音或重新绑定家庭摄像头，可以从这里回到起点。")
-                                .font(.system(size: 13, weight: .medium, design: .rounded))
-                                .foregroundStyle(PetPalTheme.inkSoft)
-                                .lineSpacing(3)
-
                             Button("重置所有应用数据", role: .destructive) {
-                                appStore.reset()
-                                dismiss()
+                                isShowingResetConfirmation = true
                             }
                             .buttonStyle(PetPalDangerButtonStyle())
                         }
@@ -184,10 +159,27 @@ struct SettingsView: View {
                 }
             }
         }
+        .alert("确认重新开始配置？", isPresented: $isShowingResetConfirmation) {
+            Button("确认重置", role: .destructive) {
+                appStore.reset()
+                dismiss()
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("这会清空当前宠物、声音和摄像头相关配置。")
+        }
     }
 
     private var petAvatar: String {
         appStore.session.petSpecies == "dog" ? "🐶" : "🐱"
+    }
+
+    private var currentVoiceDisplayName: String {
+        if appStore.session.voiceType == "clone" {
+            return "录音原声"
+        }
+
+        return appStore.session.voiceLabel.ifEmpty("未设置")
     }
 
     private var petAvatarImageURL: URL? {
