@@ -17,20 +17,18 @@ struct DemoVideoUploadView: View {
             ZStack {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 16) {
-                        PetPalStepIndicator(total: 2, current: 1)
-
                         PetPalHeroCard(
                             badge: "Camera setup",
                             stamp: "📡",
-                            title: "最后一步，马上完成",
-                            subtitle: "搜索并绑定家里的摄像头，今天的陪伴上下文就准备好了。"
+                            title: "下一环节，接入今天的画面",
+                            subtitle: "宠物档案已经建好，现在再接入摄像头上下文，聊天和提醒就能围绕今天的动态展开。"
                         )
 
                         PetPalPanelCard {
                             PetPalSectionHeader(
-                                eyebrow: "家庭摄像头",
+                                eyebrow: "下一环节",
                                 title: "给这只宠物接入今天的实时画面",
-                                chipText: "Step 4"
+                                chipText: "Next"
                             )
 
                             Button {

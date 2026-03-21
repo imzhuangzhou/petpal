@@ -1,5 +1,8 @@
 import os
 import base64
+import json
+import mimetypes
+from urllib import error, request
 from openai import OpenAI
 
 # Qwen3-VL API configuration (OpenAI-compatible)
@@ -8,6 +11,9 @@ DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 VLM_MODEL = "qwen-vl-plus"
 TEXT_MODEL = "qwen-plus"
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_IMAGE_MODEL = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
+GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 
 def get_vlm_client():
@@ -16,6 +22,90 @@ def get_vlm_client():
         api_key=DASHSCOPE_API_KEY,
         base_url=DASHSCOPE_BASE_URL,
     )
+
+
+def _detect_mime_type(file_path: str) -> str:
+    return mimetypes.guess_type(file_path)[0] or "image/jpeg"
+
+
+def generate_pet_avatar(image_path: str, species: str) -> tuple[bytes, str]:
+    """
+    Generate a cartoon avatar from a pet reference image using Gemini image generation.
+
+    Returns:
+        Tuple of (image bytes, mime type)
+    """
+    if not GEMINI_API_KEY:
+        raise RuntimeError("未配置 GEMINI_API_KEY，暂时无法生成卡通形象。")
+
+    mime_type = _detect_mime_type(image_path)
+    species_label = "狗狗" if species == "dog" else "猫咪"
+    base64_image = encode_image_base64(image_path)
+    prompt = (
+        f"请根据输入图片生成 1 张 {species_label} 的动漫卡通形象头像。"
+        "保留原宠物的花色、耳朵形状、毛发特征和整体气质。"
+        "只输出一只宠物，不要加入人类。"
+        "背景简洁干净，适合作为 App 头像，构图居中，1:1。"
+        "整体风格温暖、可爱、精致。"
+    )
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": base64_image,
+                        }
+                    },
+                ]
+            }
+        ],
+        "generationConfig": {
+            "responseModalities": ["Image"],
+            "imageConfig": {
+                "aspectRatio": "1:1",
+            },
+        },
+    }
+
+    req = request.Request(
+        url=f"{GEMINI_API_BASE_URL}/{GEMINI_IMAGE_MODEL}:generateContent",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "x-goog-api-key": GEMINI_API_KEY,
+        },
+        method="POST",
+    )
+
+    try:
+        with request.urlopen(req, timeout=90) as response:
+            raw_payload = response.read().decode("utf-8")
+    except error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"Gemini 图片生成失败：{detail or exc.reason}") from exc
+    except error.URLError as exc:
+        raise RuntimeError(f"Gemini 图片生成请求失败：{exc.reason}") from exc
+
+    response_payload = json.loads(raw_payload)
+    candidates = response_payload.get("candidates") or []
+    for candidate in candidates:
+        content = candidate.get("content") or {}
+        parts = content.get("parts") or []
+        for part in parts:
+            inline_data = part.get("inlineData") or part.get("inline_data")
+            if not inline_data:
+                continue
+
+            image_data = inline_data.get("data")
+            output_mime_type = inline_data.get("mimeType") or inline_data.get("mime_type") or "image/png"
+            if image_data:
+                return base64.b64decode(image_data), output_mime_type
+
+    raise RuntimeError("Gemini 没有返回可用的图片结果。")
 
 
 def encode_image_base64(image_path: str) -> str:

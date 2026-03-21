@@ -7,6 +7,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from database import execute_db, query_db
 from routes.events import seed_demo_events
+from vlm_service import generate_pet_avatar
 
 router = APIRouter(prefix="/api", tags=["media"])
 
@@ -14,9 +15,13 @@ BACKEND_DIR = os.path.dirname(os.path.dirname(__file__))
 UPLOADS_DIR = os.path.join(BACKEND_DIR, "uploads")
 VIDEO_UPLOADS_DIR = os.path.join(UPLOADS_DIR, "videos")
 AUDIO_UPLOADS_DIR = os.path.join(UPLOADS_DIR, "audio")
+IMAGE_UPLOADS_DIR = os.path.join(UPLOADS_DIR, "images")
+AVATAR_UPLOADS_DIR = os.path.join(UPLOADS_DIR, "avatars")
 
 os.makedirs(VIDEO_UPLOADS_DIR, exist_ok=True)
 os.makedirs(AUDIO_UPLOADS_DIR, exist_ok=True)
+os.makedirs(IMAGE_UPLOADS_DIR, exist_ok=True)
+os.makedirs(AVATAR_UPLOADS_DIR, exist_ok=True)
 
 
 def save_upload_file(upload, target_dir):
@@ -28,6 +33,53 @@ def save_upload_file(upload, target_dir):
         shutil.copyfileobj(upload.file, buffer)
 
     return file_name, file_path
+
+
+def save_generated_file(binary_data, target_dir, mime_type="image/png"):
+    ext = mimetype_to_extension(mime_type)
+    file_name = f"{uuid.uuid4().hex}{ext}"
+    file_path = os.path.join(target_dir, file_name)
+
+    with open(file_path, "wb") as buffer:
+        buffer.write(binary_data)
+
+    return file_name, file_path
+
+
+def mimetype_to_extension(mime_type):
+    mapping = {
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/webp": ".webp",
+    }
+    return mapping.get(mime_type, ".png")
+
+
+@router.post("/pet/avatar/generate")
+def upload_pet_reference_and_generate_avatar(
+    species: str = Form("cat"),
+    image: UploadFile = File(...),
+):
+    if not image.content_type or not image.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="请上传图片文件")
+
+    stored_name, photo_path = save_upload_file(image, IMAGE_UPLOADS_DIR)
+    photo_relative_path = f"/media/images/{stored_name}"
+    avatar_relative_path = ""
+    generation_error = None
+
+    try:
+        generated_image, mime_type = generate_pet_avatar(photo_path, species)
+        avatar_stored_name, _ = save_generated_file(generated_image, AVATAR_UPLOADS_DIR, mime_type)
+        avatar_relative_path = f"/media/avatars/{avatar_stored_name}"
+    except Exception as exc:
+        generation_error = str(exc)
+
+    return {
+        "photo_url": photo_relative_path,
+        "avatar_url": avatar_relative_path,
+        "generation_error": generation_error,
+    }
 
 
 @router.post("/demo-video")

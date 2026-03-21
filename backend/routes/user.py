@@ -52,6 +52,9 @@ def get_user(user_id: int):
 
 @router.post("/pet")
 def create_pet(req: CreatePetRequest):
+    if not req.photo_url or not req.photo_url.strip():
+        raise HTTPException(status_code=400, detail="请先上传宠物参考照片")
+
     pet_id = execute_db(
         """INSERT INTO pets (
                user_id, name, breed, species, photo_url, avatar_url,
@@ -66,6 +69,8 @@ def create_pet(req: CreatePetRequest):
         "id": pet_id,
         "name": req.name,
         "species": req.species,
+        "photo_url": req.photo_url,
+        "avatar_url": req.avatar_url,
         "voice_type": req.voice_type,
         "voice_key": req.voice_key,
         "voice_label": req.voice_label,

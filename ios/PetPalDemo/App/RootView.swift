@@ -132,8 +132,23 @@ struct PetPalBackground: View {
 struct PetPalHeroCard: View {
     let badge: String
     let stamp: String
+    let stampImageURL: URL?
     let title: String
     let subtitle: String
+
+    init(
+        badge: String,
+        stamp: String,
+        stampImageURL: URL? = nil,
+        title: String,
+        subtitle: String
+    ) {
+        self.badge = badge
+        self.stamp = stamp
+        self.stampImageURL = stampImageURL
+        self.title = title
+        self.subtitle = subtitle
+    }
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -155,11 +170,11 @@ struct PetPalHeroCard: View {
                 PetPalCapsuleLabel(text: badge, style: .hero)
 
                 HStack(alignment: .center, spacing: 16) {
-                    PetPalStamp(emoji: stamp)
+                    PetPalStamp(emoji: stamp, imageURL: stampImageURL)
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text(title)
-                            .font(.system(size: 30, weight: .black, design: .rounded))
+                            .font(.system(size: 28, weight: .black, design: .rounded))
                             .foregroundStyle(PetPalTheme.ink)
                             .fixedSize(horizontal: false, vertical: true)
 
@@ -313,6 +328,7 @@ struct PetPalCapsuleLabel: View {
 
 struct PetPalStamp: View {
     let emoji: String
+    let imageURL: URL?
 
     var body: some View {
         ZStack {
@@ -337,11 +353,60 @@ struct PetPalStamp: View {
         }
         .frame(width: 70, height: 70)
         .overlay(
-            Text(emoji)
-                .font(.system(size: 34))
+            PetPalImageFill(
+                imageURL: imageURL,
+                fallbackEmoji: emoji,
+                emojiSize: 34,
+                contentMode: .fill
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 23, style: .continuous))
+            .padding(8)
         )
         .rotationEffect(.degrees(-5))
         .shadow(color: Color(hex: "EFB082").opacity(0.28), radius: 16, y: 10)
+    }
+}
+
+struct PetPalImageFill: View {
+    let imageURL: URL?
+    let fallbackEmoji: String
+    let emojiSize: CGFloat
+    var contentMode: ContentMode = .fill
+
+    var body: some View {
+        Group {
+            if let imageURL {
+                AsyncImage(url: imageURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: contentMode)
+                    case .empty:
+                        fallbackContent
+                    case .failure:
+                        fallbackContent
+                    @unknown default:
+                        fallbackContent
+                    }
+                }
+            } else {
+                fallbackContent
+            }
+        }
+    }
+
+    private var fallbackContent: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(hex: "FFD8B4"), Color(hex: "F8B78D")],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            Text(fallbackEmoji)
+                .font(.system(size: emojiSize))
+        }
     }
 }
 
@@ -447,17 +512,20 @@ struct PetPalLoadingOverlay: View {
 
 struct PetPalChatHeader: View {
     let avatar: String
+    let avatarImageURL: URL?
     let title: String
     let subtitle: String
     let trailing: AnyView?
 
     init<Trailing: View>(
         avatar: String,
+        avatarImageURL: URL? = nil,
         title: String,
         subtitle: String,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.avatar = avatar
+        self.avatarImageURL = avatarImageURL
         self.title = title
         self.subtitle = subtitle
         self.trailing = AnyView(trailing())
@@ -465,10 +533,12 @@ struct PetPalChatHeader: View {
 
     init(
         avatar: String,
+        avatarImageURL: URL? = nil,
         title: String,
         subtitle: String
     ) {
         self.avatar = avatar
+        self.avatarImageURL = avatarImageURL
         self.title = title
         self.subtitle = subtitle
         self.trailing = nil
@@ -486,8 +556,14 @@ struct PetPalChatHeader: View {
                 )
                 .frame(width: 48, height: 48)
                 .overlay(
-                    Text(avatar)
-                        .font(.system(size: 24))
+                    PetPalImageFill(
+                        imageURL: avatarImageURL,
+                        fallbackEmoji: avatar,
+                        emojiSize: 24,
+                        contentMode: .fill
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .padding(4)
                 )
 
             VStack(alignment: .leading, spacing: 2) {
