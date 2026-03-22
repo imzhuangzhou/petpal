@@ -228,7 +228,7 @@ private struct CameraBindingCard: View {
             .padding(18)
         }
         .aspectRatio(4 / 3, contentMode: .fit)
-        .shadow(color: Color(hex: "D39A74").opacity(0.14), radius: 18, y: 10)
+        .shadow(color: PetPalTheme.caramel.opacity(0.14), radius: 18, y: 10)
     }
 
     private var cardBackground: LinearGradient {
@@ -267,7 +267,7 @@ private struct CameraBindingCard: View {
                         .font(.system(size: 30, weight: .black))
                         .foregroundStyle(.white)
                 )
-                .shadow(color: Color(hex: "EFA26E").opacity(0.28), radius: 14, y: 8)
+                .shadow(color: PetPalTheme.peach2.opacity(0.28), radius: 14, y: 8)
 
             Text("搜索并绑定摄像头")
                 .font(.system(size: 28, weight: .black, design: .rounded))
@@ -642,7 +642,7 @@ private struct CameraRadarScanView: View {
         .frame(maxWidth: .infinity)
         .aspectRatio(1, contentMode: .fit)
         .padding(.horizontal, 20)
-        .shadow(color: Color(hex: "D39A74").opacity(0.14), radius: 18, y: 10)
+        .shadow(color: PetPalTheme.caramel.opacity(0.14), radius: 18, y: 10)
     }
 
     private func runDiscoverySequence() async {

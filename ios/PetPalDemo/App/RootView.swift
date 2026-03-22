@@ -39,6 +39,16 @@ enum PetPalTheme {
     static let warning = Color(hex: "D3973B")
     static let danger = Color(hex: "CF6A5A")
 
+    // Additional UI colors (consolidated from hardcoded values)
+    static let alertCriticalBg = Color(hex: "FFE5E0")
+    static let alertWarningBg = Color(hex: "FFF4D5")
+    static let alertSuccessBg = Color(hex: "E4F4E8")
+    static let anxietyRelaxed = Color(hex: "527053")
+    static let anxietyMild = Color(hex: "7C5A27")
+    static let selectionActive = Color(hex: "EDA579")
+    static let surfaceCream = Color(hex: "FFF8EF")
+    static let surfaceWarm = Color(hex: "FFF7EF")
+
     static let pageGradient = LinearGradient(
         colors: [Color(hex: "FFFAF2"), Color(hex: "FFF7F0"), Color(hex: "F8F2E8")],
         startPoint: .top,
@@ -124,7 +134,7 @@ struct PetPalBackground: View {
                     }
                 )
                 .padding(.horizontal, 6)
-                .shadow(color: Color(red: 147 / 255, green: 106 / 255, blue: 77 / 255).opacity(0.18), radius: 34, y: 12)
+                .shadow(color: PetPalTheme.caramel.opacity(0.18), radius: 34, y: 12)
         }
     }
 }
@@ -158,7 +168,7 @@ struct PetPalHeroCard: View {
                     RoundedRectangle(cornerRadius: 32, style: .continuous)
                         .stroke(PetPalTheme.line.opacity(0.84), lineWidth: 1)
                 )
-                .shadow(color: Color(red: 173 / 255, green: 131 / 255, blue: 98 / 255).opacity(0.12), radius: 18, y: 8)
+                .shadow(color: PetPalTheme.caramel.opacity(0.12), radius: 18, y: 8)
 
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color(hex: "FFF0DA").opacity(0.72))
@@ -211,7 +221,7 @@ struct PetPalPanelCard<Content: View>: View {
             RoundedRectangle(cornerRadius: 28, style: .continuous)
                 .stroke(PetPalTheme.line.opacity(0.78), lineWidth: 1)
         )
-        .shadow(color: Color(red: 173 / 255, green: 131 / 255, blue: 98 / 255).opacity(0.1), radius: 14, y: 8)
+        .shadow(color: PetPalTheme.caramel.opacity(0.1), radius: 14, y: 8)
     }
 }
 
@@ -510,7 +520,7 @@ struct PetPalLoadingOverlay: View {
                 RoundedRectangle(cornerRadius: 28, style: .continuous)
                     .stroke(PetPalTheme.line.opacity(0.8), lineWidth: 1)
             )
-            .shadow(color: Color(red: 161 / 255, green: 117 / 255, blue: 85 / 255).opacity(0.12), radius: 20, y: 10)
+            .shadow(color: PetPalTheme.caramel.opacity(0.12), radius: 20, y: 10)
             .padding(.horizontal, 24)
         }
     }

@@ -95,8 +95,8 @@ def _compute_stats(events: list) -> dict:
 
 
 def get_today_events(pet_id: int) -> list:
-    """Get all events for a pet from today."""
-    today_start = datetime.now().replace(hour=0, minute=0, second=0).isoformat()
+    """Get all events for a pet from today (UTC-based)."""
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0).isoformat()
     events = query_db(
         "SELECT * FROM events WHERE pet_id = ? AND timestamp >= ? ORDER BY timestamp",
         (pet_id, today_start),
@@ -218,6 +218,7 @@ def chat_with_pet(pet_id: int, user_message: str) -> str:
         "INSERT INTO chat_history (pet_id, role, content) VALUES (?, ?, ?)",
         (pet_id, "assistant", response),
     )
+    invalidate_event_cache(pet_id)
 
     return response
 
@@ -234,6 +235,14 @@ def chat_with_pet_stream(pet_id: int, user_message: str):
     if not pet:
         yield "找不到这只宠物 😿"
         return
+
+    # Persist user message immediately so it is not lost if the stream is
+    # interrupted (e.g. client disconnects).  The assistant reply will be
+    # persisted when the stream finishes.
+    execute_db(
+        "INSERT INTO chat_history (pet_id, role, content) VALUES (?, ?, ?)",
+        (pet_id, "user", user_message),
+    )
 
     messages = []
     if system_prompt:
@@ -272,11 +281,9 @@ def chat_with_pet_stream(pet_id: int, user_message: str):
 
     full_reply = "".join(collected_tokens)
 
-    # Persist to chat history
-    execute_db(
-        "INSERT INTO chat_history (pet_id, role, content) VALUES (?, ?, ?)",
-        (pet_id, "user", user_message),
-    )
+    # Persist assistant reply and invalidate event cache so the next chat
+    # gets a fresh summary with any new events from today.
+    invalidate_event_cache(pet_id)
     execute_db(
         "INSERT INTO chat_history (pet_id, role, content) VALUES (?, ?, ?)",
         (pet_id, "assistant", full_reply),
@@ -323,12 +330,15 @@ def match_related_events(reply_text: str, pet_id: int, top_n: int = 3) -> list[d
 
     results = []
     for _, e in scored[:top_n]:
+        frame_path = e.get("frame_path", "")
+        # Serve frame as /frames/... (static mount in main.py)
+        frame_url = frame_path if frame_path.startswith("/frames/") else ""
         results.append({
             "event_id": e.get("id"),
             "event_type": e.get("event_type", ""),
             "description": e.get("description", ""),
             "timestamp": e.get("timestamp", ""),
-            "video_clip_url": e.get("frame_path", ""),
+            "video_clip_url": frame_url,
         })
     return results
 

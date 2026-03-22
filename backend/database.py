@@ -91,6 +91,7 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
         CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
         CREATE INDEX IF NOT EXISTS idx_chat_pet_id ON chat_history(pet_id);
+        CREATE INDEX IF NOT EXISTS idx_chat_created_at ON chat_history(created_at);
     """)
 
     ensure_column(cursor, "pets", "voice_type", "TEXT DEFAULT 'preset'")
@@ -110,8 +111,20 @@ def init_db():
     print("✅ Database initialized successfully")
 
 
+_VALID_TABLES = {"users", "pets", "cameras", "events", "chat_history"}
+_VALID_COLUMN_PATTERNS = {
+    "pets": {"voice_type", "voice_key", "voice_label", "voice_sample_path", "owner_alias"},
+    "cameras": {"demo_video_path", "demo_video_name"},
+    "chat_history": {"message_type", "media_kind", "media_url", "trigger_source"},
+}
+
 def ensure_column(cursor, table_name, column_name, definition):
     """Add a column if it does not exist yet."""
+    if table_name not in _VALID_TABLES:
+        raise ValueError(f"Invalid table name: {table_name}")
+    allowed = _VALID_COLUMN_PATTERNS.get(table_name, set())
+    if column_name not in allowed:
+        raise ValueError(f"Invalid column name for {table_name}: {column_name}")
     columns = {
         row["name"]
         for row in cursor.execute(f"PRAGMA table_info({table_name})").fetchall()

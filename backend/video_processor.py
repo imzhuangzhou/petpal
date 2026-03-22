@@ -145,7 +145,10 @@ def detect_pet_vocalization_clip(video_path: str, species: str) -> dict:
     if not candidates:
         return {"matched": False, "reason": "没有发现明显叫声"}
 
-    video_duration = _get_video_duration(video_path)
+    try:
+        video_duration = _get_video_duration(video_path)
+    except RuntimeError:
+        return {"matched": False, "reason": "无法读取视频时长"}
     best_match = None
 
     for candidate in candidates[:VOCALIZATION_REVIEW_TOP_N]:

@@ -111,7 +111,14 @@ def _resolve_media_path(media_url: str) -> str:
     if not media_url.startswith("/media/"):
         raise RuntimeError("视频路径格式无效。")
 
-    return os.path.join(UPLOADS_DIR, media_url.removeprefix("/media/"))
+    relative = media_url.removeprefix("/media/")
+    # Normalize and validate path stays within UPLOADS_DIR
+    joined = os.path.join(UPLOADS_DIR, relative)
+    real_path = os.path.realpath(joined)
+    real_uploads = os.path.realpath(UPLOADS_DIR)
+    if not real_path.startswith(real_uploads + os.sep) and real_path != real_uploads:
+        raise RuntimeError("视频路径无效。")
+    return real_path
 
 
 def _choose_matched_copy(*, species: str, anchor_seconds: float) -> str:

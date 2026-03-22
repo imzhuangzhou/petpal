@@ -6,6 +6,7 @@ import UserNotifications
 
 struct ChatView: View {
     @EnvironmentObject private var appStore: AppStore
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var speechRecognizer = SpeechRecognizer()
     @StateObject private var voicePlayback = VoicePlaybackController()
     @State private var draft = ""
@@ -247,6 +248,11 @@ struct ChatView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 20)
                 .background(Color(hex: "FFFBF5").opacity(0.96))
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase != .active {
+                voicePlayback.stop()
             }
         }
         .task {
@@ -669,7 +675,7 @@ struct ChatView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(event.description)
+                Text(event.description.isEmpty ? "记录事件" : event.description)
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                     .foregroundStyle(PetPalTheme.ink)
                     .lineLimit(1)
@@ -731,11 +737,11 @@ struct ChatView: View {
     private func alertBackground(_ level: String) -> Color {
         switch level {
         case "critical":
-            return Color(hex: "FFE5E0").opacity(0.86)
+            return PetPalTheme.alertCriticalBg.opacity(0.86)
         case "warning":
-            return Color(hex: "FFF4D5").opacity(0.85)
+            return PetPalTheme.alertWarningBg.opacity(0.85)
         default:
-            return Color(hex: "E4F4E8").opacity(0.8)
+            return PetPalTheme.alertSuccessBg.opacity(0.8)
         }
     }
 
@@ -755,9 +761,9 @@ struct ChatView: View {
     private func anxietyForeground(_ level: String) -> Color {
         switch level {
         case "relaxed":
-            return Color(hex: "527053")
+            return PetPalTheme.anxietyRelaxed
         case "mild":
-            return Color(hex: "7C5A27")
+            return PetPalTheme.anxietyMild
         default:
             return .white
         }
@@ -1318,7 +1324,7 @@ private struct CameraContextPanel: View {
                             RoundedRectangle(cornerRadius: 26, style: .continuous)
                                 .stroke(PetPalTheme.line.opacity(0.9), lineWidth: 1.2)
                         )
-                        .shadow(color: Color(hex: "D39A74").opacity(0.12), radius: 18, y: 10)
+                        .shadow(color: PetPalTheme.caramel.opacity(0.12), radius: 18, y: 10)
                     }
                     .buttonStyle(.plain)
                     .disabled(isUploading)
@@ -1349,7 +1355,7 @@ private struct CameraContextPanel: View {
             RoundedRectangle(cornerRadius: 28, style: .continuous)
                 .stroke(PetPalTheme.line.opacity(0.82), lineWidth: 1)
         )
-        .shadow(color: Color(red: 173 / 255, green: 131 / 255, blue: 98 / 255).opacity(0.1), radius: 14, y: 8)
+        .shadow(color: PetPalTheme.caramel.opacity(0.1), radius: 14, y: 8)
         .animation(.easeOut(duration: 0.22), value: isUploading)
     }
 }
@@ -1601,6 +1607,7 @@ private struct InlineVideoMessageView: View {
             .background(Color.black.opacity(0.08))
             .onDisappear {
                 player.pause()
+                player.seek(to: .zero)
             }
     }
 }

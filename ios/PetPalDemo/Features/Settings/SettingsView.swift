@@ -220,12 +220,12 @@ private struct PetPalDangerButtonStyle: ButtonStyle {
             .frame(minHeight: 50)
             .background(
                 LinearGradient(
-                    colors: [Color(hex: "D78172"), Color(hex: "C66B5F")],
+                    colors: [PetPalTheme.danger, PetPalTheme.cocoa],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
             )
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .opacity(configuration.isPressed ? 0.92 : 1)
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
             .animation(.easeOut(duration: 0.18), value: configuration.isPressed)
