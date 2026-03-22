@@ -1,10 +1,13 @@
+import AVFoundation
 import AVKit
 import SwiftUI
 import UniformTypeIdentifiers
+import UserNotifications
 
 struct ChatView: View {
     @EnvironmentObject private var appStore: AppStore
     @StateObject private var speechRecognizer = SpeechRecognizer()
+    @StateObject private var voicePlayback = VoicePlaybackController()
     @State private var draft = ""
     @State private var messages: [ChatMessage] = []
     @State private var isSubmitting = false
@@ -17,6 +20,13 @@ struct ChatView: View {
     @State private var cameraPanelErrorMessage: String?
     @State private var healthAlerts: [HealthAlert] = []
     @State private var anxietyReport: AnxietyResponse?
+    @State private var isFeatureMenuPresented = false
+    @State private var inputMode: ChatInputMode = .text
+    @State private var voiceCaptureState: VoiceCaptureState = .idle
+    @State private var recordingStartedAt: Date?
+    @State private var recordingElapsedSeconds = 0
+    @State private var recordingTimer: Timer?
+    @State private var hasLoadedInitialMessages = false
 
     var body: some View {
         PetPalShell {
@@ -25,7 +35,7 @@ struct ChatView: View {
                     avatar: petAvatar,
                     avatarImageURL: petAvatarImageURL,
                     title: appStore.session.petName.ifEmpty("PetPal"),
-                    subtitle: "今日上下文已加载，可以开始聊天了"
+                    subtitle: "在线"
                 ) {
                     NavigationLink {
                         SettingsView()
@@ -42,7 +52,6 @@ struct ChatView: View {
                     isExpanded: $isCameraPanelExpanded,
                     previewURL: cameraPreviewURL,
                     cameraName: cameraContextName,
-                    voiceLabel: voiceSettingName,
                     statusText: cameraPanelStatusText,
                     detailText: cameraPanelDetailText,
                     videoName: appStore.session.demoVideoName.ifEmpty("未上传上下文视频"),
@@ -58,50 +67,7 @@ struct ChatView: View {
                     ScrollView(showsIndicators: false) {
                         VStack(alignment: .leading, spacing: 12) {
                             ForEach(messages) { message in
-                                VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 6) {
-                                    HStack(alignment: .top, spacing: 8) {
-                                        if message.role == .assistant {
-                                            chatAvatar
-                                        }
-
-                                        Text(message.content)
-                                            .font(.system(size: 14, weight: .medium, design: .rounded))
-                                            .foregroundStyle(message.role == .user ? .white : PetPalTheme.ink)
-                                            .lineSpacing(4)
-                                            .padding(.horizontal, 14)
-                                            .padding(.vertical, 12)
-                                            .background(message.role == .user ? AnyShapeStyle(PetPalTheme.chatUserGradient) : AnyShapeStyle(Color(hex: "FFF7EF")))
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                                    .stroke(message.role == .assistant ? Color(hex: "E8D5C1").opacity(0.7) : .clear, lineWidth: 1),
-                                                alignment: .center
-                                            )
-                                            .clipShape(
-                                                RoundedRectangle(
-                                                    cornerRadius: 20,
-                                                    style: .continuous
-                                                )
-                                            )
-                                            .frame(maxWidth: 320, alignment: message.role == .user ? .trailing : .leading)
-
-                                        Spacer(minLength: 0)
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
-
-                                    if message.role == .assistant && !message.relatedEvents.isEmpty {
-                                        VStack(alignment: .leading, spacing: 6) {
-                                            Label("相关事件", systemImage: "paperclip")
-                                                .font(.system(size: 11, weight: .bold, design: .rounded))
-                                                .foregroundStyle(PetPalTheme.inkSoft)
-                                                .padding(.leading, 42)
-
-                                            ForEach(message.relatedEvents) { event in
-                                                relatedEventCard(event)
-                                                    .padding(.leading, 42)
-                                            }
-                                        }
-                                    }
-                                }
+                                messageRow(message)
                             }
 
                             if isSubmitting {
@@ -198,8 +164,9 @@ struct ChatView: View {
                         }
                         .padding(.horizontal, 18)
                         .padding(.top, 14)
-                        .padding(.bottom, 150)
+                        .padding(.bottom, 20)
                     }
+                    .scrollBounceBehavior(.basedOnSize)
                     .onChange(of: messages.count, initial: true) {
                         withAnimation(.easeOut(duration: 0.25)) {
                             proxy.scrollTo("bottom", anchor: .bottom)
@@ -225,24 +192,49 @@ struct ChatView: View {
         }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 0) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        featureButton(title: "健康告警", asset: .featureHealth) {
-                            Task { await fetchHealthAlerts() }
-                        }
-                        featureButton(title: "每日简报", asset: .featureReport) {
-                            Task { await fetchDailyReport() }
-                        }
-                        featureButton(title: "焦虑指数", asset: .featureAnxiety) {
-                            Task { await fetchAnxiety() }
-                        }
-                        featureButton(title: "宠物日记", asset: .featureDiary) {
-                            Task { await fetchDiary() }
-                        }
+                HStack {
+                    Button {
+                        isFeatureMenuPresented = true
+                    } label: {
+                        Label("更多能力", systemImage: "sparkles")
+                            .font(.system(size: 13, weight: .black, design: .rounded))
+                            .foregroundStyle(PetPalTheme.ink)
+                            .padding(.horizontal, 14)
+                            .frame(height: 42)
+                            .background(Color(hex: "FFF8EE").opacity(0.95))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .stroke(PetPalTheme.line, lineWidth: 1)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 10)
+                    .buttonStyle(.plain)
+                    .disabled(isSubmitting)
+
+                    Button {
+                        Task {
+                            await triggerProactiveVocalization()
+                        }
+                    } label: {
+                        Label(petSpeechFeatureTitle, systemImage: "message.badge.waveform")
+                            .font(.system(size: 13, weight: .black, design: .rounded))
+                            .foregroundStyle(canTriggerPetSpeech ? Color.white : PetPalTheme.inkSoft)
+                            .padding(.horizontal, 14)
+                            .frame(height: 42)
+                            .background(
+                                canTriggerPetSpeech
+                                    ? AnyShapeStyle(PetPalTheme.chatUserGradient)
+                                    : AnyShapeStyle(Color(hex: "F5E8D7"))
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canTriggerPetSpeech)
+
+                    Spacer(minLength: 0)
                 }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
                 .background(Color(hex: "FFFBF4").opacity(0.94))
                 .overlay(alignment: .top) {
                     Rectangle()
@@ -250,61 +242,7 @@ struct ChatView: View {
                         .frame(height: 1)
                 }
 
-                HStack(spacing: 10) {
-                    Button {
-                        if speechRecognizer.isListening {
-                            speechRecognizer.stopListening()
-                            draft = speechRecognizer.transcript
-                        } else {
-                            speechRecognizer.requestAuthorization()
-                            speechRecognizer.startListening()
-                        }
-                    } label: {
-                        Image(systemName: speechRecognizer.isListening ? "waveform.circle.fill" : "mic.fill")
-                            .font(.system(size: 18, weight: .black))
-                            .frame(width: 42, height: 42)
-                    }
-                    .buttonStyle(.plain)
-                    .background(
-                        speechRecognizer.isListening
-                            ? Color(hex: "FFE5E0").opacity(0.9)
-                            : Color(hex: "FFF7EE").opacity(0.96)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(
-                                speechRecognizer.isListening
-                                    ? Color(hex: "E58A7F").opacity(0.8)
-                                    : PetPalTheme.line,
-                                lineWidth: 1.5
-                            )
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .accessibilityLabel(speechRecognizer.isListening ? "停止录音" : "开始语音输入")
-
-                    TextField("和 \(appStore.session.petName.ifEmpty("宠物")) 聊聊天...", text: $draft)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .background(Color(hex: "FFF7EE").opacity(0.96))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                .stroke(PetPalTheme.line, lineWidth: 1.5)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                        .accessibilityLabel("聊天输入框")
-
-                    Button {
-                        Task {
-                            await sendMessage()
-                        }
-                    } label: {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 18, weight: .black))
-                            .frame(width: 46, height: 46)
-                    }
-                    .buttonStyle(ChatSendButtonStyle())
-                    .disabled(!canSendMessage)
-                }
+                inputBar
                 .padding(.horizontal, 18)
                 .padding(.top, 12)
                 .padding(.bottom, 20)
@@ -312,17 +250,7 @@ struct ChatView: View {
             }
         }
         .task {
-            if messages.isEmpty {
-                messages = [
-                    ChatMessage(
-                        role: .assistant,
-                        content: openingLine(
-                            style: appStore.session.languageStyle,
-                            species: appStore.session.petSpecies
-                        )
-                    )
-                ]
-            }
+            await loadInitialMessagesIfNeeded()
         }
         .fileImporter(
             isPresented: $isVideoImporterPresented,
@@ -333,13 +261,38 @@ struct ChatView: View {
                 await importCameraVideo(from: result)
             }
         }
-        .onChange(of: speechRecognizer.transcript) {
-            if speechRecognizer.isListening {
-                draft = speechRecognizer.transcript
+        .onChange(of: speechRecognizer.isListening) {
+            guard !speechRecognizer.isListening, voiceCaptureState == .recording else { return }
+            recordingTimer?.invalidate()
+            recordingTimer = nil
+            recordingStartedAt = nil
+            recordingElapsedSeconds = 0
+            voiceCaptureState = .idle
+            if let recognizerError = speechRecognizer.errorMessage {
+                errorMessage = recognizerError
             }
         }
         .onDisappear {
+            recordingTimer?.invalidate()
+            _ = speechRecognizer.stopListening(discardRecording: true)
+            voicePlayback.stop()
+            cleanupVoiceMessageAudioFiles()
             cleanupSelectedPreviewVideo()
+        }
+        .confirmationDialog("更多能力", isPresented: $isFeatureMenuPresented, titleVisibility: .visible) {
+            Button("健康告警") {
+                Task { await fetchHealthAlerts() }
+            }
+            Button("每日简报") {
+                Task { await fetchDailyReport() }
+            }
+            Button("焦虑指数") {
+                Task { await fetchAnxiety() }
+            }
+            Button("宠物日记") {
+                Task { await fetchDiary() }
+            }
+            Button("取消", role: .cancel) {}
         }
     }
 
@@ -358,10 +311,6 @@ struct ChatView: View {
         appStore.session.cameraName.ifEmpty("家庭摄像头")
     }
 
-    private var voiceSettingName: String {
-        appStore.session.voiceLabel.ifEmpty("默认萌宠声线")
-    }
-
     private var cameraPreviewURL: URL? {
         if let selectedPreviewVideo {
             return selectedPreviewVideo.url
@@ -376,7 +325,7 @@ struct ChatView: View {
 
     private var cameraPanelStatusText: String {
         if isUploadingContextVideo {
-            return "正在上传并解析新视频..."
+            return "正在解析新视频..."
         }
 
         if let cameraPanelErrorMessage {
@@ -385,24 +334,40 @@ struct ChatView: View {
 
         return latestCameraSummary
             ?? (hasCameraContextVideo
-                ? "\(cameraContextName) 已接入，轻点展开查看或更新视频。"
-                : "还没有视频上下文，上传后聊天会结合真实画面来回答。")
+                ? "\(cameraContextName) 已接入"
+                : "上传一段视频后，聊天会结合今天的画面。")
     }
 
     private var cameraPanelDetailText: String {
         if isUploadingContextVideo {
-            return "我们会抽帧分析视频内容，并把识别出的行为事件立即同步到当前对话。"
+            return "解析完成后会立即更新到当前对话。"
         }
 
         if hasCameraContextVideo {
-            return "当前摄像头：\(cameraContextName) · 声音设定：\(voiceSettingName)"
+            return "点开可查看或更新当前视频。"
         }
 
-        return "展开后点击 4:3 区域，从文件管理器选择一段视频来生成今天的陪伴上下文。"
+        return "展开后可从文件中选择一段视频。"
     }
 
     private var canSendMessage: Bool {
         !isSubmitting && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var canTriggerPetSpeech: Bool {
+        !isSubmitting && !isUploadingContextVideo && appStore.session.petId != nil && appStore.session.cameraId != nil && hasCameraContextVideo
+    }
+
+    private var isVoiceRecording: Bool {
+        voiceCaptureState == .recording
+    }
+
+    private var isVoiceSending: Bool {
+        voiceCaptureState == .sending
+    }
+
+    private var isVoiceInputDisabled: Bool {
+        isSubmitting || isVoiceSending
     }
 
     private var chatAvatar: some View {
@@ -426,6 +391,270 @@ struct ChatView: View {
                 .padding(3)
             )
             .padding(.top, 4)
+    }
+
+    private var petSpeechFeatureTitle: String {
+        appStore.session.petSpecies == "dog" ? "汪言汪语" : "猫言猫语"
+    }
+
+    private var inputBar: some View {
+        HStack(spacing: 10) {
+            leadingInputButton
+
+            if inputMode == .text {
+                TextField("和 \(appStore.session.petName.ifEmpty("宠物")) 聊聊天...", text: $draft)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color(hex: "FFF7EE").opacity(0.96))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(PetPalTheme.line, lineWidth: 1.5)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .accessibilityLabel("聊天输入框")
+
+                Button {
+                    Task {
+                        await sendTextMessage()
+                    }
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 18, weight: .black))
+                        .frame(width: 46, height: 46)
+                }
+                .buttonStyle(ChatSendButtonStyle())
+                .disabled(!canSendMessage)
+            } else {
+                voiceHoldButton
+            }
+        }
+    }
+
+    private var leadingInputButton: some View {
+        Button {
+            if inputMode == .voice {
+                switchToTextMode()
+            } else {
+                switchToVoiceMode()
+            }
+        } label: {
+            Image(systemName: inputMode == .voice ? "keyboard.fill" : "mic.fill")
+                .font(.system(size: 18, weight: .black))
+                .frame(width: 42, height: 42)
+        }
+        .buttonStyle(.plain)
+        .background(inputMode == .voice ? Color(hex: "FFEAD8").opacity(0.95) : Color(hex: "FFF7EE").opacity(0.96))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(inputMode == .voice ? Color(hex: "E8B27F").opacity(0.86) : PetPalTheme.line, lineWidth: 1.5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .disabled(isVoiceRecording || isVoiceSending)
+        .accessibilityLabel(inputMode == .voice ? "切换到文字输入" : "切换到语音输入")
+    }
+
+    private var voiceHoldButton: some View {
+        ZStack {
+            if isVoiceRecording {
+                HStack {
+                    recordingPulse(side: .leading)
+                    Spacer(minLength: 20)
+                    recordingPulse(side: .trailing)
+                }
+                .padding(.horizontal, 24)
+                .allowsHitTesting(false)
+            }
+
+            Text(voiceButtonTitle)
+                .font(.system(size: 16, weight: .black, design: .rounded))
+                .foregroundStyle(isVoiceRecording ? .white : PetPalTheme.ink)
+                .contentTransition(.numericText())
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 50)
+        .background(isVoiceRecording ? Color(hex: "E58A7F") : Color(hex: "FFF7EE").opacity(0.98))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(
+                    isVoiceRecording ? Color(hex: "D46E63").opacity(0.92) : PetPalTheme.line,
+                    lineWidth: 1.5
+                )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .scaleEffect(isVoiceRecording ? 0.992 : 1)
+        .animation(.easeOut(duration: 0.18), value: isVoiceRecording)
+        .onLongPressGesture(minimumDuration: 0.01, maximumDistance: 80, pressing: handleVoicePressChange) {}
+        .accessibilityLabel(isVoiceRecording ? "正在录音" : "按住说话")
+        .allowsHitTesting(!isVoiceInputDisabled || isVoiceRecording)
+    }
+
+    private var voiceButtonTitle: String {
+        if isVoiceSending {
+            return "发送中..."
+        }
+
+        if isVoiceRecording {
+            return formattedDuration(recordingElapsedSeconds)
+        }
+
+        return "按住说话"
+    }
+
+    @ViewBuilder
+    private func messageRow(_ message: ChatMessage) -> some View {
+        VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 8) {
+                if message.role == .assistant {
+                    chatAvatar
+                }
+
+                if message.displayStyle == .voice, message.role == .user {
+                    voiceMessageBubble(message)
+                } else if message.messageType == .video {
+                    proactiveVideoBubble(message)
+                } else {
+                    textMessageBubble(message)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+
+            if message.role == .assistant && !message.relatedEvents.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("相关事件", systemImage: "paperclip")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(PetPalTheme.inkSoft)
+                        .padding(.leading, 42)
+
+                    ForEach(message.relatedEvents) { event in
+                        relatedEventCard(event)
+                            .padding(.leading, 42)
+                    }
+                }
+            }
+        }
+    }
+
+    private func textMessageBubble(_ message: ChatMessage) -> some View {
+        Text(message.content)
+            .font(.system(size: 14, weight: .medium, design: .rounded))
+            .foregroundStyle(message.role == .user ? .white : PetPalTheme.ink)
+            .lineSpacing(4)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(message.role == .user ? AnyShapeStyle(PetPalTheme.chatUserGradient) : AnyShapeStyle(Color(hex: "FFF7EF")))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(message.role == .assistant ? Color(hex: "E8D5C1").opacity(0.7) : .clear, lineWidth: 1),
+                alignment: .center
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .frame(maxWidth: 320, alignment: message.role == .user ? .trailing : .leading)
+    }
+
+    private func voiceMessageBubble(_ message: ChatMessage) -> some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            Button {
+                handleVoiceBubbleTap(message)
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: voicePlayback.playingMessageID == message.id ? "pause.fill" : "play.fill")
+                        .font(.system(size: 13, weight: .black))
+                        .frame(width: 28, height: 28)
+                        .background(Color.white.opacity(0.18))
+                        .clipShape(Circle())
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("语音消息")
+                            .font(.system(size: 13, weight: .black, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.95))
+
+                        Text(formattedDuration(displayedVoiceDuration(for: message)))
+                            .font(.system(size: 16, weight: .black, design: .rounded))
+                            .foregroundStyle(.white)
+                            .contentTransition(.numericText())
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: "waveform")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.92))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .frame(maxWidth: 320, minHeight: 68, alignment: .leading)
+                .background(
+                    LinearGradient(
+                        colors: [Color(hex: "F09A7F"), Color(hex: "DA6F62")],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(Color(hex: "C86055").opacity(0.42), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+
+            Text((message.voiceTranscript ?? "").ifEmpty(message.content))
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(PetPalTheme.inkSoft)
+                .lineSpacing(3)
+                .frame(maxWidth: 320, alignment: .trailing)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func displayedVoiceDuration(for message: ChatMessage) -> Int {
+        if voicePlayback.playingMessageID == message.id {
+            return max(voicePlayback.remainingSeconds, 0)
+        }
+
+        return max(message.voiceDurationSeconds ?? 0, 0)
+    }
+
+    @ViewBuilder
+    private func proactiveVideoBubble(_ message: ChatMessage) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles.rectangle.stack")
+                    .font(.system(size: 11, weight: .black))
+                Text(petSpeechFeatureTitle)
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+            }
+            .foregroundStyle(Color(hex: "8A5A32"))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color(hex: "F7E8D6"))
+            .clipShape(Capsule())
+
+            Text(message.content)
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundStyle(PetPalTheme.ink)
+                .lineSpacing(4)
+
+            if let videoURL = appStore.apiClient.resolvedURL(for: message.mediaURL) {
+                InlineVideoMessageView(url: videoURL)
+                    .frame(width: 286, height: 184)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+        }
+        .padding(12)
+        .background(Color(hex: "FFF7EF"))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color(hex: "E8D5C1").opacity(0.75), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .frame(maxWidth: 320, alignment: .leading)
+    }
+
+    private func recordingPulse(side: PulseSide) -> some View {
+        RecordingPulseView(isAnimating: isVoiceRecording, side: side)
     }
 
     // MARK: - Related event card
@@ -499,29 +728,6 @@ struct ChatView: View {
         }
     }
 
-    private func featureButton(title: String, asset: PetPalArtAsset, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                PetPalArtImage(asset: asset)
-                    .frame(width: 18, height: 18)
-
-                Text(title)
-                    .font(.system(size: 13, weight: .black, design: .rounded))
-                    .foregroundStyle(PetPalTheme.ink)
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 42)
-                .background(Color(hex: "FFF8EE").opacity(0.95))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(PetPalTheme.line, lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .disabled(isSubmitting)
-    }
-
     private func alertBackground(_ level: String) -> Color {
         switch level {
         case "critical":
@@ -577,29 +783,138 @@ struct ChatView: View {
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
-    private func openingLine(style: String, species: String) -> String {
+    private func openingLine(style: String, species: String, ownerAlias: String) -> String {
+        let trimmedOwnerAlias = ownerAlias.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasOwnerAlias = !trimmedOwnerAlias.isEmpty
+
         if style == "loyal" {
             return species == "dog"
-                ? "主人！我今天一直守着门口，终于等到你来找我啦！"
-                : "主人主人，我今天也有乖乖等你，快夸夸我。"
+                ? (hasOwnerAlias
+                    ? "\(trimmedOwnerAlias)！我今天一直守着门口，终于等到你来找我啦！"
+                    : "主人！我今天一直守着门口，终于等到你来找我啦！")
+                : (hasOwnerAlias
+                    ? "\(trimmedOwnerAlias)，我今天也有乖乖等你，快夸夸我。"
+                    : "主人主人，我今天也有乖乖等你，快夸夸我。")
         }
 
         if style == "chatty" {
             return species == "dog"
-                ? "你知道吗你知道吗，今天家里发生了好多事，我都记住了！"
-                : "你终于来了，我今天从窗边看到好多小动静，想讲给你听。"
+                ? (hasOwnerAlias
+                    ? "\(trimmedOwnerAlias)，你知道吗你知道吗，今天家里发生了好多事，我都记住了！"
+                    : "你知道吗你知道吗，今天家里发生了好多事，我都记住了！")
+                : (hasOwnerAlias
+                    ? "\(trimmedOwnerAlias)，你终于来了，我今天从窗边看到好多小动静，想讲给你听。"
+                    : "你终于来了，我今天从窗边看到好多小动静，想讲给你听。")
         }
 
         if style == "chill" {
-            return "今天还算不错，阳光、零食和想你这件事都刚刚好。"
+            return hasOwnerAlias
+                ? "\(trimmedOwnerAlias)，今天还算不错，阳光、零食和想你这件事都刚刚好。"
+                : "今天还算不错，阳光、零食和想你这件事都刚刚好。"
         }
 
         return species == "dog"
-            ? "哼，我才不是特地在等你，只是刚好想和你说说今天的事。"
-            : "哼，你终于想起来看我了？我今天在门口等了你好一会儿。"
+            ? (hasOwnerAlias
+                ? "哼，\(trimmedOwnerAlias)，我才不是特地在等你，只是刚好想和你说说今天的事。"
+                : "哼，我才不是特地在等你，只是刚好想和你说说今天的事。")
+            : (hasOwnerAlias
+                ? "哼，\(trimmedOwnerAlias)，你终于想起来看我了？我今天在门口等了你好一会儿。"
+                : "哼，你终于想起来看我了？我今天在门口等了你好一会儿。")
     }
 
     // MARK: - Actions
+
+    private func switchToVoiceMode() {
+        errorMessage = nil
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.88)) {
+            inputMode = .voice
+        }
+    }
+
+    private func switchToTextMode() {
+        recordingTimer?.invalidate()
+        voiceCaptureState = .idle
+        recordingElapsedSeconds = 0
+        recordingStartedAt = nil
+        _ = speechRecognizer.stopListening(discardRecording: true)
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.88)) {
+            inputMode = .text
+        }
+    }
+
+    private func handleVoicePressChange(_ isPressing: Bool) {
+        if isPressing {
+            guard !isVoiceRecording, !isVoiceSending, !isSubmitting else { return }
+            Task {
+                await startVoiceCapture()
+            }
+        } else if isVoiceRecording {
+            Task {
+                await finishVoiceCapture()
+            }
+        }
+    }
+
+    private func startVoiceCapture() async {
+        errorMessage = nil
+        let authorized = await speechRecognizer.requestAuthorization()
+        guard authorized else {
+            errorMessage = speechRecognizer.errorMessage ?? "语音识别权限未授权"
+            return
+        }
+
+        do {
+            try speechRecognizer.startListening()
+            recordingStartedAt = Date()
+            recordingElapsedSeconds = 0
+            voiceCaptureState = .recording
+            recordingTimer?.invalidate()
+            recordingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+                Task { @MainActor in
+                    guard let recordingStartedAt else { return }
+                    recordingElapsedSeconds = max(Int(Date().timeIntervalSince(recordingStartedAt).rounded(.down)), 0)
+                }
+            }
+        } catch {
+            errorMessage = speechRecognizer.errorMessage ?? error.localizedDescription
+            voiceCaptureState = .idle
+        }
+    }
+
+    private func finishVoiceCapture() async {
+        guard isVoiceRecording else { return }
+
+        voiceCaptureState = .sending
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+
+        let captureResult = speechRecognizer.stopListening()
+        recordingStartedAt = nil
+        recordingElapsedSeconds = 0
+
+        let transcript = captureResult.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !transcript.isEmpty else {
+            if let audioFileURL = captureResult.audioFileURL {
+                try? FileManager.default.removeItem(at: audioFileURL)
+            }
+            errorMessage = "未识别到有效内容，请再试一次。"
+            voiceCaptureState = .idle
+            return
+        }
+
+        let voiceMessage = ChatMessage(
+            role: .user,
+            content: transcript,
+            displayStyle: .voice,
+            voiceAudioURL: captureResult.audioFileURL,
+            voiceDurationSeconds: max(captureResult.durationSeconds, 1),
+            voiceTranscript: transcript
+        )
+
+        await sendMessage(userMessage: voiceMessage, backendMessage: transcript)
+        voiceCaptureState = .idle
+        inputMode = .voice
+    }
 
     private func toggleCameraPanel() {
         withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
@@ -703,20 +1018,29 @@ struct ChatView: View {
         isUploadingContextVideo = false
     }
 
-    private func sendMessage() async {
+    private func sendTextMessage() async {
+        await sendMessage(
+            userMessage: ChatMessage(role: .user, content: draft.trimmingCharacters(in: .whitespacesAndNewlines)),
+            backendMessage: draft
+        )
+        if !isSubmitting {
+            draft = ""
+        }
+    }
+
+    private func sendMessage(userMessage: ChatMessage, backendMessage: String) async {
         guard let petID = appStore.session.petId else { return }
-        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = backendMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        draft = ""
         errorMessage = nil
         isSubmitting = true
         healthAlerts = []
         anxietyReport = nil
-        messages.append(ChatMessage(role: .user, content: trimmed))
+        messages.append(userMessage)
 
         // Create an empty assistant message for streaming
-        let streamMessageID = UUID()
+        let streamMessageID = UUID().uuidString
         messages.append(ChatMessage(id: streamMessageID, role: .assistant, content: ""))
 
         do {
@@ -754,6 +1078,93 @@ struct ChatView: View {
         isSubmitting = false
     }
 
+    private func handleVoiceBubbleTap(_ message: ChatMessage) {
+        guard let audioURL = message.voiceAudioURL else { return }
+
+        if voicePlayback.playingMessageID == message.id {
+            voicePlayback.stop()
+            return
+        }
+
+        let duration = max(message.voiceDurationSeconds ?? 0, 1)
+        voicePlayback.play(messageID: message.id, audioURL: audioURL, durationSeconds: duration)
+    }
+
+    private func loadInitialMessagesIfNeeded() async {
+        guard !hasLoadedInitialMessages else { return }
+        hasLoadedInitialMessages = true
+
+        guard let petID = appStore.session.petId else {
+            messages = [openingAssistantMessage]
+            return
+        }
+
+        do {
+            let history = try await appStore.apiClient.fetchChatHistory(petID: petID)
+            messages = history.isEmpty ? [openingAssistantMessage] : history
+        } catch {
+            messages = [openingAssistantMessage]
+        }
+    }
+
+    private var openingAssistantMessage: ChatMessage {
+        ChatMessage(
+            role: .assistant,
+            content: openingLine(
+                style: appStore.session.languageStyle,
+                species: appStore.session.petSpecies,
+                ownerAlias: appStore.session.ownerAlias
+            )
+        )
+    }
+
+    private func triggerProactiveVocalization() async {
+        guard let petID = appStore.session.petId, let cameraID = appStore.session.cameraId else {
+            errorMessage = "请先上传一段陪伴视频，再试试这个功能。"
+            return
+        }
+
+        errorMessage = nil
+        healthAlerts = []
+        anxietyReport = nil
+        isSubmitting = true
+
+        do {
+            let response = try await appStore.apiClient.triggerProactiveVocalization(
+                petID: petID,
+                cameraID: cameraID
+            )
+            messages.append(response.message)
+
+            if response.matched {
+                let notifications = PetPalLocalNotificationManager.shared
+                let granted = await notifications.requestAuthorizationIfNeeded()
+                if granted {
+                    await notifications.deliverImmediately(
+                        title: response.notificationTitle,
+                        body: response.notificationBody
+                    )
+                }
+            }
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+
+        isSubmitting = false
+    }
+
+    private func cleanupVoiceMessageAudioFiles() {
+        for message in messages {
+            guard let audioURL = message.voiceAudioURL else { continue }
+            try? FileManager.default.removeItem(at: audioURL)
+        }
+    }
+
+    private func formattedDuration(_ totalSeconds: Int) -> String {
+        let safeSeconds = max(totalSeconds, 0)
+        return String(format: "%02d:%02d", safeSeconds / 60, safeSeconds % 60)
+    }
+
     private func fetchDailyReport() async {
         guard let petID = appStore.session.petId else { return }
         await fetchTextAction(
@@ -774,7 +1185,6 @@ struct ChatView: View {
         guard let petID = appStore.session.petId else { return }
         errorMessage = nil
         isSubmitting = true
-        anxietyReport = nil
         messages.append(ChatMessage(role: .user, content: "你今天身体还好吗？"))
 
         do {
@@ -791,7 +1201,6 @@ struct ChatView: View {
         guard let petID = appStore.session.petId else { return }
         errorMessage = nil
         isSubmitting = true
-        healthAlerts = []
         messages.append(ChatMessage(role: .user, content: "我不在家的时候，你是不是有点想我？"))
 
         do {
@@ -828,7 +1237,6 @@ private struct CameraContextPanel: View {
     @Binding var isExpanded: Bool
     let previewURL: URL?
     let cameraName: String
-    let voiceLabel: String
     let statusText: String
     let detailText: String
     let videoName: String
@@ -882,11 +1290,8 @@ private struct CameraContextPanel: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                                 .padding(6)
 
-                            HStack(spacing: 8) {
-                                PetPalCapsuleLabel(text: cameraName, style: .context)
-                                PetPalCapsuleLabel(text: voiceLabel, style: .soft)
-                            }
-                            .padding(16)
+                            PetPalCapsuleLabel(text: cameraName, style: .context)
+                                .padding(16)
 
                             if isUploading {
                                 VStack(spacing: 10) {
@@ -898,7 +1303,7 @@ private struct CameraContextPanel: View {
                                         .font(.system(size: 14, weight: .black, design: .rounded))
                                         .foregroundStyle(.white)
 
-                                    Text("抽帧识别完成后会立即更新聊天上下文")
+                                    Text("完成后会立即更新聊天上下文")
                                         .font(.system(size: 12, weight: .medium, design: .rounded))
                                         .foregroundStyle(.white.opacity(0.88))
                                 }
@@ -1016,7 +1421,7 @@ private struct CameraContextPreview: View {
                     .font(.system(size: 15, weight: .black, design: .rounded))
                     .foregroundStyle(PetPalTheme.ink)
 
-                Text("支持从文件管理器选择视频，上传后会自动解析真实行为事件。")
+                Text("从文件里选择一段视频作为今天的上下文。")
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(PetPalTheme.inkSoft)
                     .multilineTextAlignment(.center)
@@ -1036,5 +1441,212 @@ private struct ChatSendButtonStyle: ButtonStyle {
             .opacity(configuration.isPressed ? 0.92 : 1)
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
             .animation(.easeOut(duration: 0.18), value: configuration.isPressed)
+    }
+}
+
+private enum ChatInputMode {
+    case text
+    case voice
+}
+
+private enum VoiceCaptureState {
+    case idle
+    case recording
+    case sending
+}
+
+private enum PulseSide {
+    case leading
+    case trailing
+}
+
+@MainActor
+private final class VoicePlaybackController: NSObject, ObservableObject, AVAudioPlayerDelegate {
+    @Published private(set) var playingMessageID: String?
+    @Published private(set) var remainingSeconds = 0
+
+    private var player: AVAudioPlayer?
+    private var timer: Timer?
+
+    func play(messageID: String, audioURL: URL, durationSeconds: Int) {
+        stop()
+
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default, options: [.defaultToSpeaker, .duckOthers])
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
+
+            let player = try AVAudioPlayer(contentsOf: audioURL)
+            player.delegate = self
+            player.prepareToPlay()
+            player.play()
+
+            self.player = player
+            self.playingMessageID = messageID
+            self.remainingSeconds = durationSeconds
+
+            timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    self?.syncRemainingTime()
+                }
+            }
+        } catch {
+            stop()
+        }
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        player?.stop()
+        player = nil
+        playingMessageID = nil
+        remainingSeconds = 0
+
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        Task { @MainActor in
+            self.stop()
+        }
+    }
+
+    private func syncRemainingTime() {
+        guard let player else {
+            stop()
+            return
+        }
+
+        let remaining = max(Int(ceil(player.duration - player.currentTime)), 0)
+        remainingSeconds = remaining
+        if remaining <= 0 || !player.isPlaying {
+            stop()
+        }
+    }
+}
+
+@MainActor
+private final class PetPalLocalNotificationManager {
+    static let shared = PetPalLocalNotificationManager()
+
+    private let center = UNUserNotificationCenter.current()
+    private var hasRequestedAuthorization = false
+
+    func requestAuthorizationIfNeeded() async -> Bool {
+        let settings = await notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            hasRequestedAuthorization = true
+            return true
+        case .denied:
+            hasRequestedAuthorization = true
+            return false
+        case .notDetermined:
+            guard !hasRequestedAuthorization else { return false }
+            hasRequestedAuthorization = true
+            return await requestAuthorization()
+        @unknown default:
+            return false
+        }
+    }
+
+    func deliverImmediately(title: String, body: String) async {
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "petpal-proactive-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+
+        await withCheckedContinuation { continuation in
+            center.add(request) { _ in
+                continuation.resume()
+            }
+        }
+    }
+
+    private func requestAuthorization() async -> Bool {
+        await withCheckedContinuation { continuation in
+            center.requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
+                continuation.resume(returning: granted)
+            }
+        }
+    }
+
+    private func notificationSettings() async -> UNNotificationSettings {
+        await withCheckedContinuation { continuation in
+            center.getNotificationSettings { settings in
+                continuation.resume(returning: settings)
+            }
+        }
+    }
+}
+
+private struct InlineVideoMessageView: View {
+    @State private var player: AVPlayer
+
+    init(url: URL) {
+        _player = State(initialValue: AVPlayer(url: url))
+    }
+
+    var body: some View {
+        VideoPlayer(player: player)
+            .background(Color.black.opacity(0.08))
+            .onDisappear {
+                player.pause()
+            }
+    }
+}
+
+private struct RecordingPulseView: View {
+    let isAnimating: Bool
+    let side: PulseSide
+    @State private var animate = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.white.opacity(0.26), lineWidth: 2)
+                .frame(width: 26, height: 26)
+                .scaleEffect(animate ? 1.9 : 0.7)
+                .opacity(animate ? 0 : 0.9)
+
+            Circle()
+                .stroke(Color.white.opacity(0.4), lineWidth: 1.5)
+                .frame(width: 18, height: 18)
+                .scaleEffect(animate ? 1.45 : 0.78)
+                .opacity(animate ? 0 : 0.85)
+
+            Circle()
+                .fill(Color.white.opacity(0.9))
+                .frame(width: 8, height: 8)
+        }
+        .frame(width: 34, height: 34)
+        .onAppear {
+            guard isAnimating else { return }
+            animatePulse()
+        }
+        .onChange(of: isAnimating) {
+            if isAnimating {
+                animatePulse()
+            } else {
+                animate = false
+            }
+        }
+        .offset(x: side == .leading ? -2 : 2)
+    }
+
+    private func animatePulse() {
+        animate = false
+        withAnimation(.easeOut(duration: 1.1).repeatForever(autoreverses: false)) {
+            animate = true
+        }
     }
 }

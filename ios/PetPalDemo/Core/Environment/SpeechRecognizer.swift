@@ -1,9 +1,15 @@
+import AVFoundation
 import Foundation
 import Speech
-import AVFoundation
 
 @MainActor
 final class SpeechRecognizer: ObservableObject {
+    struct CaptureResult: Sendable {
+        let transcript: String
+        let audioFileURL: URL?
+        let durationSeconds: Int
+    }
+
     @Published var transcript = ""
     @Published var isListening = false
     @Published var isAvailable = false
@@ -13,62 +19,100 @@ final class SpeechRecognizer: ObservableObject {
     private let audioEngine = AVAudioEngine()
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
+    private var recordingFile: AVAudioFile?
+    private var recordingURL: URL?
+    private var recordingStartedAt: Date?
+    private var hasInstalledTap = false
 
     init(locale: Locale = Locale(identifier: "zh-CN")) {
         self.recognizer = SFSpeechRecognizer(locale: locale)
         self.isAvailable = recognizer?.isAvailable ?? false
     }
 
-    func requestAuthorization() {
-        SFSpeechRecognizer.requestAuthorization { [weak self] status in
-            Task { @MainActor in
-                switch status {
-                case .authorized:
-                    self?.isAvailable = true
-                default:
-                    self?.isAvailable = false
-                    self?.errorMessage = "语音识别权限未授权"
-                }
+    func requestAuthorization() async -> Bool {
+        let speechAuthorized = await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status == .authorized)
             }
         }
-    }
 
-    func startListening() {
-        guard let recognizer, recognizer.isAvailable else {
-            errorMessage = "语音识别不可用"
-            return
+        let microphoneAuthorized = await withCheckedContinuation { continuation in
+            AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                continuation.resume(returning: granted)
+            }
         }
 
-        // Reset
-        stopListening()
+        isAvailable = speechAuthorized && microphoneAuthorized && (recognizer?.isAvailable ?? false)
+        if !speechAuthorized {
+            errorMessage = "语音识别权限未授权"
+        } else if !microphoneAuthorized {
+            errorMessage = "无法使用麦克风，请在系统设置里允许录音权限。"
+        } else if !(recognizer?.isAvailable ?? false) {
+            errorMessage = "语音识别当前不可用"
+        } else {
+            errorMessage = nil
+        }
+
+        return isAvailable
+    }
+
+    func startListening() throws {
+        guard let recognizer, recognizer.isAvailable else {
+            errorMessage = "语音识别不可用"
+            throw CaptureError.unavailable
+        }
+
+        resetState(discardRecording: true)
         transcript = ""
         errorMessage = nil
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        self.recognitionRequest = request
+        recognitionRequest = request
 
         let audioSession = AVAudioSession.sharedInstance()
         do {
-            try audioSession.setCategory(.record, mode: .measurement, options: .duckOthers)
+            try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .duckOthers])
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
             errorMessage = "无法启动录音: \(error.localizedDescription)"
-            return
+            throw error
         }
 
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
-            request.append(buffer)
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("caf")
+
+        do {
+            recordingFile = try AVAudioFile(forWriting: fileURL, settings: recordingFormat.settings)
+            recordingURL = fileURL
+        } catch {
+            errorMessage = "无法创建录音文件: \(error.localizedDescription)"
+            throw error
         }
+
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
+            guard let self else { return }
+            request.append(buffer)
+            do {
+                try self.recordingFile?.write(from: buffer)
+            } catch {
+                Task { @MainActor in
+                    self.errorMessage = "保存录音失败: \(error.localizedDescription)"
+                }
+            }
+        }
+        hasInstalledTap = true
 
         audioEngine.prepare()
         do {
             try audioEngine.start()
         } catch {
             errorMessage = "无法启动音频引擎: \(error.localizedDescription)"
-            return
+            resetState(discardRecording: true)
+            throw error
         }
 
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
@@ -76,22 +120,79 @@ final class SpeechRecognizer: ObservableObject {
                 if let result {
                     self?.transcript = result.bestTranscription.formattedString
                 }
-                if error != nil || (result?.isFinal ?? false) {
-                    self?.stopListening()
+                if let error {
+                    self?.errorMessage = "语音识别中断: \(error.localizedDescription)"
+                    _ = self?.stopListening()
                 }
             }
         }
 
+        recordingStartedAt = Date()
         isListening = true
     }
 
-    func stopListening() {
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+    @discardableResult
+    func stopListening(discardRecording: Bool = false) -> CaptureResult {
+        let result = CaptureResult(
+            transcript: transcript.trimmingCharacters(in: .whitespacesAndNewlines),
+            audioFileURL: discardRecording ? nil : recordingURL,
+            durationSeconds: captureDurationSeconds
+        )
+
+        resetState(discardRecording: discardRecording)
+        return result
+    }
+
+    private var captureDurationSeconds: Int {
+        guard let recordingStartedAt else { return 0 }
+        let elapsed = Date().timeIntervalSince(recordingStartedAt)
+        guard elapsed > 0 else { return 0 }
+        return max(Int(elapsed.rounded(.up)), 1)
+    }
+
+    private func resetState(discardRecording: Bool) {
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
+
+        if hasInstalledTap {
+            audioEngine.inputNode.removeTap(onBus: 0)
+            hasInstalledTap = false
+        }
+
         recognitionRequest?.endAudio()
         recognitionRequest = nil
         recognitionTask?.cancel()
         recognitionTask = nil
-        isListening = false
+        recordingFile = nil
+
+        if discardRecording, let recordingURL {
+            try? FileManager.default.removeItem(at: recordingURL)
+        }
+
+        self.recordingURL = nil
+        self.recordingStartedAt = nil
+        self.isListening = false
+
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        } catch {
+            if errorMessage == nil {
+                errorMessage = "录音结束，但音频会话关闭失败：\(error.localizedDescription)"
+            }
+        }
+    }
+}
+
+extension SpeechRecognizer {
+    enum CaptureError: LocalizedError {
+        case unavailable
+
+        var errorDescription: String? {
+            switch self {
+            case .unavailable:
+                return "语音识别不可用"
+            }
+        }
     }
 }

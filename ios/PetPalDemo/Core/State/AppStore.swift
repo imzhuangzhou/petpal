@@ -29,7 +29,8 @@ final class AppStore: ObservableObject {
         response: CreatePetResponse,
         name: String,
         species: String,
-        style: String
+        style: String,
+        ownerAlias: String
     ) {
         session.petId = response.id
         session.petName = name
@@ -37,17 +38,7 @@ final class AppStore: ObservableObject {
         session.petPhotoURL = response.photoURL
         session.petAvatarURL = response.avatarURL
         session.languageStyle = style
-        session.voiceType = response.voiceType
-        session.voiceKey = response.voiceKey
-        session.voiceLabel = response.voiceLabel
-        session.voiceSampleURL = ""
-    }
-
-    func applyUploadedVoiceSample(_ response: APIClient.VoiceSampleUploadResponse) {
-        session.voiceType = response.voiceType
-        session.voiceKey = response.voiceKey
-        session.voiceLabel = response.voiceLabel
-        session.voiceSampleURL = response.voiceSampleURL
+        session.ownerAlias = response.ownerAlias.isEmpty ? ownerAlias : response.ownerAlias
     }
 
     func applyUploadedDemoVideo(_ response: DemoVideoUploadResponse) {

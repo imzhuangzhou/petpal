@@ -1,19 +1,7 @@
 import Foundation
 
 final class APIClient {
-    struct VoiceSampleUploadResponse: Decodable, Sendable {
-        let voiceType: String
-        let voiceKey: String
-        let voiceLabel: String
-        let voiceSampleURL: String
-
-        enum CodingKeys: String, CodingKey {
-            case voiceType = "voice_type"
-            case voiceKey = "voice_key"
-            case voiceLabel = "voice_label"
-            case voiceSampleURL = "voice_sample_url"
-        }
-    }
+    private static let avatarGenerationTimeout: TimeInterval = 180
 
     let baseURL: URL
     private let session: URLSession
@@ -78,7 +66,8 @@ final class APIClient {
         return try await upload(
             endpoint: Endpoint(path: "/api/pet/avatar/generate", method: .post),
             body: body,
-            contentType: "multipart/form-data; boundary=\(boundary)"
+            contentType: "multipart/form-data; boundary=\(boundary)",
+            timeoutInterval: Self.avatarGenerationTimeout
         )
     }
 
@@ -107,29 +96,29 @@ final class APIClient {
         )
     }
 
-    func uploadPetVoiceSample(
-        petID: Int,
-        label: String,
-        audioFileURL: URL
-    ) async throws -> VoiceSampleUploadResponse {
-        let boundary = "Boundary-\(UUID().uuidString)"
-        let body = try MultipartFormDataBuilder.makeBody(
-            fields: [MultipartFormDataField(name: "label", value: label)],
-            files: [MultipartFormDataFile(fieldName: "audio", fileURL: audioFileURL)],
-            boundary: boundary
-        )
-
-        return try await upload(
-            endpoint: Endpoint(path: "/api/pet/\(petID)/voice/sample", method: .post),
-            body: body,
-            contentType: "multipart/form-data; boundary=\(boundary)"
-        )
-    }
-
     func sendChat(petID: Int, message: String) async throws -> ChatReplyResponse {
         try await send(
             endpoint: Endpoint(path: "/api/chat", method: .post),
             body: ChatRequest(petID: petID, message: message)
+        )
+    }
+
+    func fetchChatHistory(petID: Int, limit: Int = 50) async throws -> [ChatMessage] {
+        try await fetch(
+            endpoint: Endpoint(
+                path: "/api/chat/history/\(petID)",
+                queryItems: [URLQueryItem(name: "limit", value: String(limit))]
+            )
+        )
+    }
+
+    func triggerProactiveVocalization(
+        petID: Int,
+        cameraID: Int
+    ) async throws -> ProactiveChatMessageResponse {
+        try await send(
+            endpoint: Endpoint(path: "/api/chat/proactive/vocalization", method: .post),
+            body: ProactiveVocalizationRequest(petID: petID, cameraID: cameraID)
         )
     }
 
@@ -164,7 +153,6 @@ final class APIClient {
         }
 
         let jsonDecoder = JSONDecoder()
-        jsonDecoder.keyDecodingStrategy = .convertFromSnakeCase
 
         for try await line in stream.lines {
             guard line.hasPrefix("data: ") else { continue }
@@ -242,9 +230,10 @@ final class APIClient {
     private func upload<Response: Decodable & Sendable>(
         endpoint: Endpoint,
         body: Data,
-        contentType: String
+        contentType: String,
+        timeoutInterval: TimeInterval? = nil
     ) async throws -> Response {
-        var request = try makeRequest(for: endpoint)
+        var request = try makeRequest(for: endpoint, timeoutInterval: timeoutInterval)
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         return try await execute(request, uploadBody: body)
     }
@@ -324,8 +313,6 @@ final class APIClient {
     }
 
     private static func makeDecoder() -> JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return decoder
+        JSONDecoder()
     }
 }

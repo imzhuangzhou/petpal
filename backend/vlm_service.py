@@ -1,12 +1,19 @@
 import os
 import base64
+import io
+import json
+import logging
 import mimetypes
+import subprocess
+import time
 import google.auth
+import httpx
 from google.auth.exceptions import DefaultCredentialsError
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
+from PIL import Image, ImageOps
 
 # Qwen3-VL API configuration (OpenAI-compatible)
 DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
@@ -14,17 +21,46 @@ DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 VLM_MODEL = "qwen-vl-plus"
 TEXT_MODEL = "qwen-plus"
+DASHSCOPE_TIMEOUT_SECONDS = float(os.environ.get("DASHSCOPE_TIMEOUT_SECONDS", "45"))
 VERTEX_AI_PROJECT = os.environ.get("VERTEX_AI_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT", "")
 VERTEX_AI_LOCATION = os.environ.get("VERTEX_AI_LOCATION", "global")
 VERTEX_IMAGE_MODEL = os.environ.get("VERTEX_IMAGE_MODEL", "imagen-3.0-capability-001")
+VERTEX_IMAGE_TIMEOUT_MS = int(os.environ.get("VERTEX_IMAGE_TIMEOUT_MS", "120000"))
+VERTEX_IMAGE_MAX_RETRIES = int(os.environ.get("VERTEX_IMAGE_MAX_RETRIES", "3"))
+
+logger = logging.getLogger(__name__)
 
 
 def get_vlm_client():
     """Get OpenAI-compatible client for Qwen VL."""
+    if not DASHSCOPE_API_KEY:
+        raise RuntimeError(
+            "未配置 DashScope API Key。请设置 `DASHSCOPE_API_KEY` 后重启后端。"
+        )
+
     return OpenAI(
         api_key=DASHSCOPE_API_KEY,
         base_url=DASHSCOPE_BASE_URL,
+        timeout=DASHSCOPE_TIMEOUT_SECONDS,
     )
+
+
+def _get_gcloud_cli_project() -> str:
+    try:
+        result = subprocess.run(
+            ["gcloud", "config", "get-value", "project"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except Exception:
+        return ""
+
+    project = result.stdout.strip()
+    if not project or project == "(unset)":
+        return ""
+    return project
 
 
 def get_image_client():
@@ -35,16 +71,17 @@ def get_image_client():
         )
     except DefaultCredentialsError as exc:
         raise RuntimeError(
-            "未配置 Google Cloud 凭据。请先执行 "
-            "`gcloud auth application-default login`，"
-            "或设置 `GOOGLE_APPLICATION_CREDENTIALS` 指向本机服务账号 JSON。"
+            "未配置 Google Cloud 凭据。最简单且安全的方式是先执行 "
+            "`gcloud auth application-default login`；"
+            "如果你用服务账号，也可以设置 `GOOGLE_APPLICATION_CREDENTIALS` 指向本机 JSON。"
         ) from exc
 
-    project = VERTEX_AI_PROJECT or detected_project
+    project = VERTEX_AI_PROJECT or detected_project or _get_gcloud_cli_project()
     if not project:
         raise RuntimeError(
-            "未配置 Vertex AI 项目。请设置 `VERTEX_AI_PROJECT` 或 "
-            "`GOOGLE_CLOUD_PROJECT`。"
+            "未配置 Vertex AI 项目。最省事的方式是执行 "
+            "`gcloud config set project <YOUR_PROJECT_ID>`；"
+            "也可以设置 `VERTEX_AI_PROJECT` 或 `GOOGLE_CLOUD_PROJECT`。"
         )
 
     return genai.Client(
@@ -52,22 +89,46 @@ def get_image_client():
         project=project,
         location=VERTEX_AI_LOCATION,
         credentials=credentials,
+        http_options=genai_types.HttpOptions(timeout=VERTEX_IMAGE_TIMEOUT_MS),
     )
 
 
 def _build_pet_avatar_prompt(species: str) -> str:
     species_label = "狗狗" if species == "dog" else "猫咪"
     return (
-        f"基于输入参考图，为这只{species_label}生成 1 张动漫卡通头像。"
-        "必须保留原宠物的花色、耳朵形状、脸型、毛发纹理、眼神与整体神态特征。"
-        "只输出一只宠物，不要出现人类，不要增加第二只宠物。"
-        "构图居中，主体清晰，背景干净简洁，适合作为 App 头像。"
-        "输出比例为 1:1，整体风格温暖、可爱、精致。"
+        f"基于输入参考图，为这只{species_label}生成 1 张用于 PetPal App 的宠物头像插画。"
+        "这是一个严格的头像生成任务，不是照片重绘任务。最终成品必须严格为 1:1 正方形构图，"
+        "不能是横图、竖图、接近正方形但不精确的比例，也不能出现主体被裁切、头顶缺失、耳朵被截断或主体偏到边缘的情况。"
+        "核心目标是保留这只宠物的身份特征，而不是复刻原图动作。请优先准确提取并保留以下稳定特征："
+        "毛发主色与辅色、花纹和颜色分布位置、眼睛颜色与眼神气质、耳朵形状、脸型、鼻口区域细节、长毛或短毛质感与整体轮廓特征。"
+        "不需要严格复现参考图里的原始姿势、角度、动作或场景。允许将动作简化为更适合头像展示的自然静态姿态，只要让人一眼认出还是同一只宠物即可。"
+        "画风必须与 PetPal App 现有视觉风格统一：温暖、治愈、奶油感、低饱和、圆润、干净、精致，像高质量角色头像插画或宠物贴纸。"
+        "整体以二维插画风格为主，可带轻微柔和体积感，但绝不能是写实摄影风、真实毛发渲染风、3D 建模风或电影概念图风格。"
+        "请让主体居中，画面以头部和上半身为主，表情自然亲和，轮廓简洁清晰，留白充足，适合直接作为 App 头像。"
+        "背景必须干净简洁，使用浅奶油色、暖米色或非常轻的柔和晕染，不要真实室内外场景，不要复杂背景。"
+        "只输出一只宠物，不要出现人类、第二只宠物、文字、水印、边框、玩具、家具、项圈、衣物或其他装饰物。"
+        "不要追求高分辨率写实纹理，不要强调每一根毛发，保持适合移动端头像的简洁完成度。"
+    )
+
+
+def _build_pet_avatar_negative_prompt() -> str:
+    return (
+        "写实照片感，摄影风，真实毛发特写，超高细节皮毛纹理，电影感光影，复杂真实场景背景，"
+        "夸张动作，完全复刻原图姿势，主体过小，非正方形构图，头部或耳朵被裁切，多只宠物，人类，"
+        "文字，水印，项圈，衣服，玩具，3D 渲染，赛博色，高饱和霓虹色"
     )
 
 
 def _extract_image_error_detail(exc: Exception) -> str:
+    if isinstance(exc, httpx.RemoteProtocolError):
+        return "上游服务连接中断，未返回完整响应，请稍后重试。"
+
+    if isinstance(exc, (httpx.ConnectError, httpx.ReadError, httpx.WriteError, httpx.ReadTimeout)):
+        return "连接 Vertex AI 服务失败，请检查本机网络、代理或稍后重试。"
+
     if isinstance(exc, genai_errors.APIError):
+        if exc.message == "Reference image should have reference id.":
+            return "参考图参数缺少 reference_id，请升级后的服务端代码重试。"
         if exc.message:
             return exc.message
         return f"HTTP {exc.status}"
@@ -96,9 +157,197 @@ def _extract_image_error_detail(exc: Exception) -> str:
     return str(exc)
 
 
+def _extract_dashscope_error_detail(exc: Exception) -> str:
+    if isinstance(exc, APITimeoutError):
+        return f"请求超时（>{int(DASHSCOPE_TIMEOUT_SECONDS)}s）"
+
+    if isinstance(exc, APIConnectionError):
+        return "网络连接失败，请检查本机外网连接和代理配置"
+
+    if isinstance(exc, APIStatusError):
+        status_code = getattr(exc, "status_code", None)
+        response = getattr(exc, "response", None)
+
+        if status_code in (401, 403):
+            return "鉴权失败，请检查 `DASHSCOPE_API_KEY` 是否有效且有权限"
+        if status_code == 429:
+            return "请求被限流，请稍后重试"
+
+        if response is not None:
+            try:
+                payload = response.json()
+            except Exception:
+                payload = None
+
+            if isinstance(payload, dict):
+                error_payload = payload.get("error")
+                if isinstance(error_payload, dict):
+                    message = error_payload.get("message")
+                    if isinstance(message, str) and message.strip():
+                        return f"HTTP {status_code}: {message.strip()}"
+
+            text = getattr(response, "text", "")
+            if isinstance(text, str) and text.strip():
+                return f"HTTP {status_code}: {text.strip()}"
+
+        if status_code is not None:
+            return f"HTTP {status_code}"
+
+    return str(exc)
+
+
+def _run_dashscope_completion(
+    *,
+    model: str,
+    messages: list[dict],
+    max_tokens: int,
+    operation: str,
+):
+    client = get_vlm_client()
+    started_at = time.perf_counter()
+
+    logger.info(
+        "Starting DashScope request: operation=%s model=%s timeout_s=%s",
+        operation,
+        model,
+        DASHSCOPE_TIMEOUT_SECONDS,
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens,
+        )
+        logger.info(
+            "Finished DashScope request: operation=%s elapsed=%.2fs",
+            operation,
+            time.perf_counter() - started_at,
+        )
+        return response
+    except (APITimeoutError, APIConnectionError, APIStatusError) as exc:
+        detail = _extract_dashscope_error_detail(exc)
+        logger.exception(
+            "DashScope request failed: operation=%s elapsed=%.2fs detail=%s",
+            operation,
+            time.perf_counter() - started_at,
+            detail,
+        )
+        raise RuntimeError(f"DashScope（{operation}）失败：{detail}") from exc
+    except Exception as exc:
+        detail = _extract_dashscope_error_detail(exc)
+        logger.exception(
+            "Unexpected DashScope request failure: operation=%s elapsed=%.2fs detail=%s",
+            operation,
+            time.perf_counter() - started_at,
+            detail,
+        )
+        raise RuntimeError(f"DashScope（{operation}）失败：{detail}") from exc
+    finally:
+        client.close()
+
+
+def open_dashscope_stream(
+    *,
+    model: str,
+    messages: list[dict],
+    max_tokens: int,
+    operation: str,
+):
+    client = get_vlm_client()
+    started_at = time.perf_counter()
+
+    logger.info(
+        "Starting DashScope stream: operation=%s model=%s timeout_s=%s",
+        operation,
+        model,
+        DASHSCOPE_TIMEOUT_SECONDS,
+    )
+
+    try:
+        stream = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens,
+            stream=True,
+        )
+        return client, stream, started_at
+    except (APITimeoutError, APIConnectionError, APIStatusError) as exc:
+        client.close()
+        detail = _extract_dashscope_error_detail(exc)
+        logger.exception(
+            "DashScope stream setup failed: operation=%s elapsed=%.2fs detail=%s",
+            operation,
+            time.perf_counter() - started_at,
+            detail,
+        )
+        raise RuntimeError(f"DashScope（{operation}）失败：{detail}") from exc
+    except Exception as exc:
+        client.close()
+        detail = _extract_dashscope_error_detail(exc)
+        logger.exception(
+            "Unexpected DashScope stream setup failure: operation=%s elapsed=%.2fs detail=%s",
+            operation,
+            time.perf_counter() - started_at,
+            detail,
+        )
+        raise RuntimeError(f"DashScope（{operation}）失败：{detail}") from exc
+
+
 def _guess_image_mime_type(image_path: str) -> str:
     mime_type, _ = mimetypes.guess_type(image_path)
     return mime_type or "image/jpeg"
+
+
+def _mime_type_to_pil_format(mime_type: str) -> str:
+    return {
+        "image/jpeg": "JPEG",
+        "image/png": "PNG",
+        "image/webp": "WEBP",
+    }.get(mime_type, "JPEG")
+
+
+def _load_pet_avatar_reference_image(image_path: str, max_edge: int = 1024) -> tuple[bytes, str]:
+    mime_type = _guess_image_mime_type(image_path)
+
+    with open(image_path, "rb") as image_file:
+        original_bytes = image_file.read()
+
+    try:
+        with Image.open(io.BytesIO(original_bytes)) as opened_image:
+            normalized = ImageOps.exif_transpose(opened_image)
+            if max(normalized.size) <= max_edge:
+                return original_bytes, mime_type
+
+            resized = normalized.copy()
+            resized.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+
+            output = io.BytesIO()
+            save_format = _mime_type_to_pil_format(mime_type)
+            if save_format == "JPEG" and resized.mode not in ("RGB", "L"):
+                resized = resized.convert("RGB")
+
+            resized.save(output, format=save_format)
+            resized_bytes = output.getvalue()
+            logger.info(
+                "Downscaled pet avatar reference image: path=%s original_size=%s resized_size=%s bytes=%s",
+                image_path,
+                normalized.size,
+                resized.size,
+                len(resized_bytes),
+            )
+            return resized_bytes, mime_type
+    except Exception as exc:
+        logger.warning("Falling back to original pet avatar reference image: path=%s error=%s", image_path, exc)
+        return original_bytes, mime_type
+
+
+def _is_retryable_vertex_error(exc: Exception) -> bool:
+    if isinstance(exc, (httpx.RemoteProtocolError, httpx.ConnectError, httpx.ReadError, httpx.WriteError, httpx.ReadTimeout)):
+        return True
+
+    message = str(exc).lower()
+    return "server disconnected without sending a response" in message
 
 
 def generate_pet_avatar(image_path: str, species: str) -> tuple[bytes, str]:
@@ -110,47 +359,95 @@ def generate_pet_avatar(image_path: str, species: str) -> tuple[bytes, str]:
     """
     client = get_image_client()
     prompt = _build_pet_avatar_prompt(species)
-    mime_type = _guess_image_mime_type(image_path)
+    negative_prompt = _build_pet_avatar_negative_prompt()
+    started_at = time.perf_counter()
 
+    logger.info(
+        "Starting pet avatar generation: species=%s model=%s timeout_ms=%s path=%s",
+        species,
+        VERTEX_IMAGE_MODEL,
+        VERTEX_IMAGE_TIMEOUT_MS,
+        image_path,
+    )
+
+    result = None
     try:
-        with open(image_path, "rb") as image_file:
-            result = client.models.edit_image(
-                model=VERTEX_IMAGE_MODEL,
-                prompt=prompt,
-                reference_images=[
-                    genai_types.RawReferenceImage(
-                        reference_image=genai_types.Image(
-                            image_bytes=image_file.read(),
-                            mime_type=mime_type,
+        image_bytes, mime_type = _load_pet_avatar_reference_image(image_path)
+
+        for attempt in range(1, VERTEX_IMAGE_MAX_RETRIES + 1):
+            try:
+                result = client.models.edit_image(
+                    model=VERTEX_IMAGE_MODEL,
+                    prompt=prompt,
+                    reference_images=[
+                        genai_types.RawReferenceImage(
+                            reference_id=1,
+                            reference_image=genai_types.Image(
+                                image_bytes=image_bytes,
+                                mime_type=mime_type,
+                            )
                         )
-                    )
-                ],
-                config=genai_types.EditImageConfig(
-                    number_of_images=1,
-                    aspect_ratio="1:1",
-                    output_mime_type="image/png",
-                    edit_mode=genai_types.EditMode.EDIT_MODE_CONTROLLED_EDITING,
-                ),
-            )
+                    ],
+                    config=genai_types.EditImageConfig(
+                        number_of_images=1,
+                        aspect_ratio="1:1",
+                        base_steps=35,
+                        negative_prompt=negative_prompt,
+                        output_mime_type="image/png",
+                        edit_mode=genai_types.EditMode.EDIT_MODE_CONTROLLED_EDITING,
+                    ),
+                )
+                break
+            except Exception as exc:
+                if not _is_retryable_vertex_error(exc) or attempt == VERTEX_IMAGE_MAX_RETRIES:
+                    raise
+
+                delay_seconds = min(1.5 * attempt, 4.0)
+                logger.warning(
+                    "Retrying pet avatar generation after transient Vertex error: attempt=%s/%s delay=%.1fs error=%s",
+                    attempt,
+                    VERTEX_IMAGE_MAX_RETRIES,
+                    delay_seconds,
+                    _extract_image_error_detail(exc),
+                )
+                time.sleep(delay_seconds)
     except genai_errors.APIError as exc:
         detail = _extract_image_error_detail(exc)
+        logger.exception("Vertex AI image generation failed after %.2fs: %s", time.perf_counter() - started_at, detail)
+        raise RuntimeError(f"Vertex AI 图片生成失败：{detail}") from exc
+    except (httpx.RemoteProtocolError, httpx.ConnectError, httpx.ReadError, httpx.WriteError, httpx.ReadTimeout) as exc:
+        detail = _extract_image_error_detail(exc)
+        logger.exception("Vertex AI transport failed after %.2fs: %s", time.perf_counter() - started_at, detail)
         raise RuntimeError(f"Vertex AI 图片生成失败：{detail}") from exc
     except (APIConnectionError, APITimeoutError) as exc:
+        logger.exception("Vertex AI image generation request failed after %.2fs", time.perf_counter() - started_at)
         raise RuntimeError(f"图片生成请求失败：{exc}") from exc
     except Exception as exc:
         detail = _extract_image_error_detail(exc)
+        logger.exception("Unexpected Vertex AI image generation failure after %.2fs: %s", time.perf_counter() - started_at, detail)
         raise RuntimeError(f"Vertex AI 图片生成失败：{detail}") from exc
+    finally:
+        client.close()
 
     if not result.generated_images:
+        logger.error("Vertex AI returned no generated images after %.2fs", time.perf_counter() - started_at)
         raise RuntimeError("Vertex AI 没有返回可用的图片结果。")
 
     first_image = result.generated_images[0].image
     if not first_image:
+        logger.error("Vertex AI returned empty image wrapper after %.2fs", time.perf_counter() - started_at)
         raise RuntimeError("Vertex AI 没有返回可用的图片结果。")
 
     if first_image.image_bytes:
+        logger.info(
+            "Finished pet avatar generation in %.2fs with mime_type=%s bytes=%s",
+            time.perf_counter() - started_at,
+            first_image.mime_type or "image/png",
+            len(first_image.image_bytes),
+        )
         return first_image.image_bytes, first_image.mime_type or "image/png"
 
+    logger.error("Vertex AI returned empty image bytes after %.2fs", time.perf_counter() - started_at)
     raise RuntimeError("Vertex AI 返回了空图片内容。")
 
 
@@ -166,10 +463,10 @@ def describe_frame(image_path: str) -> str:
 
     Returns a natural language description of what's happening in the frame.
     """
-    client = get_vlm_client()
     base64_image = encode_image_base64(image_path)
 
-    response = client.chat.completions.create(
+    response = _run_dashscope_completion(
+        operation="监控画面描述",
         model=VLM_MODEL,
         messages=[
             {
@@ -208,10 +505,10 @@ def classify_action(image_path: str) -> dict:
         event_type is one of: eating, drinking, sleeping, playing, resting,
                               litter_box, zoomies, waiting, other
     """
-    client = get_vlm_client()
     base64_image = encode_image_base64(image_path)
 
-    response = client.chat.completions.create(
+    response = _run_dashscope_completion(
+        operation="宠物行为分类",
         model=VLM_MODEL,
         messages=[
             {
@@ -251,7 +548,6 @@ def classify_action(image_path: str) -> dict:
         max_tokens=100,
     )
 
-    import json
     raw = response.choices[0].message.content.strip()
 
     # Try to parse JSON
@@ -273,18 +569,76 @@ def classify_action(image_path: str) -> dict:
         }
 
 
+def review_pet_vocalization(frame_paths: list[str], species: str) -> dict:
+    if not frame_paths:
+        return {"matched": False, "confidence": 0.0, "reason": "没有可分析画面"}
+
+    content: list[dict] = []
+    for frame_path in frame_paths:
+        base64_image = encode_image_base64(frame_path)
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{base64_image}"
+                },
+            }
+        )
+
+    species_label = "狗狗" if species == "dog" else "猫咪"
+    content.append(
+        {
+            "type": "text",
+            "text": (
+                f"请综合判断这组连续监控画面中的{species_label}，是否同时满足以下条件："
+                "1. 主体正面或近似正面朝向镜头；"
+                "2. 正在明显发声，能看出张嘴、叫喊或呼唤状态。"
+                "请严格返回 JSON，不要附加其他文字："
+                '{"matched": true, "confidence": 0.0, "reason": "简短原因"}'
+                "其中 matched 必须是 true/false；confidence 是 0 到 1 之间的小数；"
+                "reason 用中文，20 字以内。"
+            ),
+        }
+    )
+
+    response = _run_dashscope_completion(
+        operation="宠物对镜头发声复核",
+        model=VLM_MODEL,
+        messages=[{"role": "user", "content": content}],
+        max_tokens=200,
+    )
+
+    raw = response.choices[0].message.content.strip()
+    try:
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        result = json.loads(raw)
+        return {
+            "matched": bool(result.get("matched", False)),
+            "confidence": float(result.get("confidence", 0.0)),
+            "reason": str(result.get("reason", "")).strip(),
+        }
+    except (json.JSONDecodeError, IndexError, TypeError, ValueError):
+        return {
+            "matched": False,
+            "confidence": 0.0,
+            "reason": raw[:50],
+        }
+
+
 def generate_text(prompt: str, system_prompt: str = "") -> str:
     """
     Use Qwen text model for general text generation (dialogue, reports, etc.)
     """
-    client = get_vlm_client()
-
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
-    response = client.chat.completions.create(
+    response = _run_dashscope_completion(
+        operation="文本生成",
         model=TEXT_MODEL,
         messages=messages,
         max_tokens=1000,

@@ -1,8 +1,14 @@
 import os
 import sys
+import logging
 
 # Add backend directory to path
 sys.path.insert(0, os.path.dirname(__file__))
+
+logging.basicConfig(
+    level=os.environ.get("PETPAL_LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

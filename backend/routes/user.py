@@ -20,6 +20,7 @@ class CreatePetRequest(BaseModel):
     avatar_url: Optional[str] = ""
     language_style: Optional[str] = "tsundere"
     style_prompt: Optional[str] = ""
+    owner_alias: Optional[str] = ""
     voice_type: Optional[str] = "preset"
     voice_key: Optional[str] = "cat-soft"
     voice_label: Optional[str] = "奶呼噜"
@@ -58,12 +59,12 @@ def create_pet(req: CreatePetRequest):
     pet_id = execute_db(
         """INSERT INTO pets (
                user_id, name, breed, species, photo_url, avatar_url,
-               language_style, style_prompt, voice_type, voice_key, voice_label, voice_sample_path
+               language_style, style_prompt, owner_alias, voice_type, voice_key, voice_label, voice_sample_path
            )
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (req.user_id, req.name, req.breed, req.species,
          req.photo_url, req.avatar_url, req.language_style, req.style_prompt,
-         req.voice_type, req.voice_key, req.voice_label, req.voice_sample_path),
+         req.owner_alias, req.voice_type, req.voice_key, req.voice_label, req.voice_sample_path),
     )
     return {
         "id": pet_id,
@@ -71,6 +72,7 @@ def create_pet(req: CreatePetRequest):
         "species": req.species,
         "photo_url": req.photo_url,
         "avatar_url": req.avatar_url,
+        "owner_alias": req.owner_alias,
         "voice_type": req.voice_type,
         "voice_key": req.voice_key,
         "voice_label": req.voice_label,

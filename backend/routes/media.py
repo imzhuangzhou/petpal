@@ -1,6 +1,8 @@
 import os
 import shutil
 import uuid
+import logging
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -31,6 +33,7 @@ os.makedirs(IMAGE_UPLOADS_DIR, exist_ok=True)
 os.makedirs(AVATAR_UPLOADS_DIR, exist_ok=True)
 
 MAX_ANALYSIS_FRAMES = 10
+logger = logging.getLogger(__name__)
 
 
 def save_upload_file(upload, target_dir):
@@ -232,20 +235,49 @@ def upload_pet_reference_and_generate_avatar(
     species: str = Form("cat"),
     image: UploadFile = File(...),
 ):
+    request_started_at = time.perf_counter()
+
     if not image.content_type or not image.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="请上传图片文件")
+
+    logger.info(
+        "Received pet avatar request: species=%s filename=%s content_type=%s",
+        species,
+        image.filename or "",
+        image.content_type or "",
+    )
 
     stored_name, photo_path = save_upload_file(image, IMAGE_UPLOADS_DIR)
     photo_relative_path = f"/media/images/{stored_name}"
     avatar_relative_path = ""
     generation_error = None
+    photo_size = os.path.getsize(photo_path)
+
+    logger.info(
+        "Stored pet reference photo: path=%s size_bytes=%s elapsed=%.2fs",
+        photo_path,
+        photo_size,
+        time.perf_counter() - request_started_at,
+    )
 
     try:
+        generation_started_at = time.perf_counter()
         generated_image, mime_type = generate_pet_avatar(photo_path, species)
         avatar_stored_name, _ = save_generated_file(generated_image, AVATAR_UPLOADS_DIR, mime_type)
         avatar_relative_path = f"/media/avatars/{avatar_stored_name}"
+        logger.info(
+            "Pet avatar generated successfully: avatar_path=%s elapsed=%.2fs total=%.2fs",
+            avatar_relative_path,
+            time.perf_counter() - generation_started_at,
+            time.perf_counter() - request_started_at,
+        )
     except Exception as exc:
         generation_error = str(exc)
+        logger.warning(
+            "Pet avatar generation failed: error=%s total=%.2fs",
+            generation_error,
+            time.perf_counter() - request_started_at,
+        )
 
     return {
         "photo_url": photo_relative_path,

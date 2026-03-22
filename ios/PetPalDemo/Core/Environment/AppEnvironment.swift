@@ -15,7 +15,9 @@ enum AppEnvironment {
     }
 
     static var apiBaseURL: URL {
-        guard let url = URL(string: apiBaseURLString), let scheme = url.scheme else {
+        let configuredValue = apiBaseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard var components = URLComponents(string: configuredValue), let scheme = components.scheme else {
             preconditionFailure("Invalid API base URL: \(apiBaseURLString)")
         }
 
@@ -23,6 +25,30 @@ enum AppEnvironment {
             preconditionFailure("Unsupported API base URL scheme: \(scheme)")
         }
 
+        if shouldUseIPv4Loopback(for: components.host) {
+            components.host = "127.0.0.1"
+        }
+
+        guard let url = components.url else {
+            preconditionFailure("Invalid API base URL after normalization: \(configuredValue)")
+        }
+
         return url
+    }
+
+    private static func shouldUseIPv4Loopback(for host: String?) -> Bool {
+        guard isRunningOnSimulator, let normalizedHost = host?.lowercased() else {
+            return false
+        }
+
+        return normalizedHost == "localhost" || normalizedHost == "::1"
+    }
+
+    private static var isRunningOnSimulator: Bool {
+        #if targetEnvironment(simulator)
+        true
+        #else
+        false
+        #endif
     }
 }

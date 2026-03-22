@@ -1,9 +1,13 @@
 import json
+import logging
 import re
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 from database import query_db
-from vlm_service import generate_text, get_vlm_client, TEXT_MODEL
+from vlm_service import generate_text, open_dashscope_stream, TEXT_MODEL
+
+logger = logging.getLogger(__name__)
 
 # Language style presets
 STYLE_PRESETS = {
@@ -124,7 +128,7 @@ def build_system_prompt(pet: dict, today_events: list) -> str:
     style_config = STYLE_PRESETS.get(style, STYLE_PRESETS["tsundere"])
     species_label = "狗狗" if pet.get("species") == "dog" else "猫咪"
     breed_or_species = pet.get("breed") or species_label
-    voice_label = pet.get("voice_label") or "默认萌宠声线"
+    owner_alias = (pet.get("owner_alias") or "").strip()
 
     # Custom style override
     if pet.get("style_prompt"):
@@ -136,11 +140,18 @@ def build_system_prompt(pet: dict, today_events: list) -> str:
     pet_id = pet.get("id") or 0
     event_summary, stats, _ = get_cached_event_context(pet_id)
 
+    if owner_alias:
+        owner_reference = f"你的主人希望你称呼 TA 为“{owner_alias}”。"
+        owner_rule = f"6. 如果需要称呼主人，优先使用“{owner_alias}”，不要改用其他称呼"
+    else:
+        owner_reference = "如果需要称呼主人，可以自然称呼对方为铲屎官。"
+        owner_rule = "6. 如果需要称呼主人，可以自然称呼对方为铲屎官"
+
     system_prompt = f"""
 {persona}
 
-你是一只{breed_or_species}，名字叫{pet["name"]}，你的主人昵称是你的铲屎官。
-你的声音设定是：{voice_label}。
+你是一只{breed_or_species}，名字叫{pet["name"]}。
+{owner_reference}
 
 === 今日行为记录 ===
 {event_summary}
@@ -158,7 +169,8 @@ def build_system_prompt(pet: dict, today_events: list) -> str:
 3. 如果主人问到你没有记录的事情，可以根据人设合理地创编
 4. 回答控制在100字以内，简洁自然
 5. 可以适当加入颜文字或表情让对话更生动
-6. 不要暴露你是AI，你就是这只宠物
+{owner_rule}
+7. 不要暴露你是AI，你就是这只宠物
 """
     return system_prompt
 
@@ -223,25 +235,40 @@ def chat_with_pet_stream(pet_id: int, user_message: str):
         yield "找不到这只宠物 😿"
         return
 
-    client = get_vlm_client()
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": full_prompt})
 
-    stream = client.chat.completions.create(
-        model=TEXT_MODEL,
-        messages=messages,
-        max_tokens=1000,
-        stream=True,
-    )
-
     collected_tokens: list[str] = []
-    for chunk in stream:
-        delta = chunk.choices[0].delta if chunk.choices else None
-        if delta and delta.content:
-            collected_tokens.append(delta.content)
-            yield delta.content
+    client = None
+    started_at = None
+
+    try:
+        client, stream, started_at = open_dashscope_stream(
+            model=TEXT_MODEL,
+            messages=messages,
+            max_tokens=1000,
+            operation="流式对话",
+        )
+
+        for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta and delta.content:
+                collected_tokens.append(delta.content)
+                yield delta.content
+    except Exception as exc:
+        logger.exception("Streaming chat failed for pet_id=%s: %s", pet_id, exc)
+        yield f"聊天服务暂时不可用：{exc}"
+        return
+    finally:
+        if client is not None:
+            logger.info(
+                "Finished DashScope stream: operation=%s elapsed=%.2fs",
+                "流式对话",
+                time.perf_counter() - started_at if started_at is not None else 0,
+            )
+            client.close()
 
     full_reply = "".join(collected_tokens)
 

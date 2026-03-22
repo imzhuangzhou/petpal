@@ -113,7 +113,7 @@ iOS 客户端通过 `ios/PetPalDemo/Resources/Info.plist` 中的 `API_BASE_URL` 
 
 | 场景 | 地址 |
 |------|------|
-| Simulator 联调 | `http://localhost:8000` |
+| Simulator 联调 | `http://127.0.0.1:8000` |
 | 真机联调 | `http://192.168.x.x:8000`（替换为你的局域网 IP） |
 
 ---
@@ -122,7 +122,7 @@ iOS 客户端通过 `ios/PetPalDemo/Resources/Info.plist` 中的 `API_BASE_URL` 
 
 当前仓库里真实可跑通的演示路径是：
 
-1. 用户在 iOS 客户端完成宠物信息配置，包括参考图、人格和声音设定
+1. 用户在 iOS 客户端完成宠物信息配置，包括参考图和人格设定
 2. 进入“连接摄像头”页，选择一个 **假摄像头**
 3. 每个假摄像头会对应一段 **假视频**，客户端会生成并上传这段联调视频
 4. 后端对上传视频进行抽帧，并调用 VLM 分析生成行为事件
@@ -138,7 +138,7 @@ iOS 客户端通过 `ios/PetPalDemo/Resources/Info.plist` 中的 `API_BASE_URL` 
 |------|------|------|
 | POST | `/api/user` | 创建用户 |
 | GET | `/api/user/{user_id}` | 获取用户信息 |
-| POST | `/api/pet` | 创建宠物（含人设/声线配置） |
+| POST | `/api/pet` | 创建宠物（含人设配置） |
 | GET | `/api/pet/{pet_id}` | 获取宠物详情 |
 | GET | `/api/pets/{user_id}` | 获取用户所有宠物 |
 | POST | `/api/camera` | 创建摄像头 |
@@ -150,7 +150,7 @@ iOS 客户端通过 `ios/PetPalDemo/Resources/Info.plist` 中的 `API_BASE_URL` 
 | GET | `/api/diary/{pet_id}` | 生成宠物日记 |
 | GET | `/api/anxiety/{pet_id}` | 获取焦虑指数 |
 | POST | `/api/demo-video` | 上传演示视频并生成行为上下文 |
-| POST | `/api/pet/{pet_id}/voice/sample` | 上传宠物原声音频 |
+| POST | `/api/pet/{pet_id}/voice/sample` | 上传宠物原声音频（legacy 兼容接口） |
 | POST | `/api/demo/init` | 初始化演示行为数据 |
 
 ---

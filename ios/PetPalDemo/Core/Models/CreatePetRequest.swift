@@ -9,10 +9,7 @@ struct CreatePetRequest: Encodable, Sendable {
     let avatarURL: String
     let languageStyle: String
     let stylePrompt: String
-    let voiceType: String
-    let voiceKey: String
-    let voiceLabel: String
-    let voiceSamplePath: String
+    let ownerAlias: String
 
     init(
         userID: Int,
@@ -23,10 +20,7 @@ struct CreatePetRequest: Encodable, Sendable {
         avatarURL: String = "",
         languageStyle: String = "tsundere",
         stylePrompt: String = "",
-        voiceType: String = "preset",
-        voiceKey: String = "cat-soft",
-        voiceLabel: String = "奶呼噜",
-        voiceSamplePath: String = ""
+        ownerAlias: String = ""
     ) {
         self.userID = userID
         self.name = name
@@ -36,10 +30,7 @@ struct CreatePetRequest: Encodable, Sendable {
         self.avatarURL = avatarURL
         self.languageStyle = languageStyle
         self.stylePrompt = stylePrompt
-        self.voiceType = voiceType
-        self.voiceKey = voiceKey
-        self.voiceLabel = voiceLabel
-        self.voiceSamplePath = voiceSamplePath
+        self.ownerAlias = ownerAlias
     }
 
     enum CodingKeys: String, CodingKey {
@@ -51,9 +42,6 @@ struct CreatePetRequest: Encodable, Sendable {
         case avatarURL = "avatar_url"
         case languageStyle = "language_style"
         case stylePrompt = "style_prompt"
-        case voiceType = "voice_type"
-        case voiceKey = "voice_key"
-        case voiceLabel = "voice_label"
-        case voiceSamplePath = "voice_sample_path"
+        case ownerAlias = "owner_alias"
     }
 }

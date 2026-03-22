@@ -17,18 +17,11 @@ struct DemoVideoUploadView: View {
             ZStack {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 16) {
-                        PetPalHeroCard(
-                            badge: "Camera setup",
-                            stampAsset: .featureRadar,
-                            title: "下一环节，接入今天的画面",
-                            subtitle: "宠物档案已经建好，现在再接入摄像头上下文，聊天和提醒就能围绕今天的动态展开。"
-                        )
-
                         PetPalPanelCard {
                             PetPalSectionHeader(
-                                eyebrow: "下一环节",
-                                title: "给这只宠物接入今天的实时画面",
-                                chipText: "Next"
+                                eyebrow: "摄像头",
+                                title: "搜索并绑定摄像头",
+                                chipText: nil
                             )
 
                             Button {
@@ -53,16 +46,10 @@ struct DemoVideoUploadView: View {
                                     value: connectionStatusText
                                 )
 
-                                Text(selectedCamera == nil ? "点按上方卡片开始搜索附近摄像头。" : "点按上方卡片可以重新搜索或切换摄像头。")
+                                Text(selectedCamera == nil ? "点按上方卡片开始搜索。" : "点按上方卡片可重新搜索或切换设备。")
                                     .font(.system(size: 12, weight: .medium, design: .rounded))
                                     .foregroundStyle(PetPalTheme.inkSoft)
                             }
-
-                            Text("当前版本的雷达搜索和实时画面均为 demo 演示；完成配置时会自动生成一段联调视频并继续走现有上传接口，方便你测试后续聊天和设置流程。")
-                                .font(.system(size: 13, weight: .medium, design: .rounded))
-                                .foregroundStyle(PetPalTheme.inkSoft)
-                                .lineSpacing(3)
-                                .padding(.top, 2)
 
                             if let errorMessage {
                                 Text(errorMessage)
@@ -72,8 +59,10 @@ struct DemoVideoUploadView: View {
                         }
                     }
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 120)
+                    .padding(.bottom, 24)
                 }
+                .safeAreaPadding(.top, 12)
+                .scrollBounceBehavior(.basedOnSize)
 
                 if isUploading {
                     PetPalLoadingOverlay(
@@ -133,7 +122,7 @@ struct DemoVideoUploadView: View {
 
     private var connectionStatusText: String {
         if isUploading {
-            return "正在同步回放"
+            return "正在同步视频"
         }
 
         if isConnecting {
@@ -141,7 +130,7 @@ struct DemoVideoUploadView: View {
         }
 
         if selectedCamera != nil {
-            return "实时画面已接入"
+            return "已连接"
         }
 
         return "等待绑定"
@@ -280,11 +269,11 @@ private struct CameraBindingCard: View {
                 )
                 .shadow(color: Color(hex: "EFA26E").opacity(0.28), radius: 14, y: 8)
 
-            Text("添加摄像头")
+            Text("搜索并绑定摄像头")
                 .font(.system(size: 28, weight: .black, design: .rounded))
                 .foregroundStyle(PetPalTheme.ink)
 
-            Text("点击进入雷达扫描，搜索附近可接入的家庭摄像头。")
+            Text("点击后即可搜索附近设备。")
                 .font(.system(size: 14, weight: .medium, design: .rounded))
                 .foregroundStyle(PetPalTheme.inkSoft)
                 .multilineTextAlignment(.center)
@@ -302,7 +291,7 @@ private struct CameraBindingCard: View {
                         .font(.system(size: 19, weight: .black, design: .rounded))
                         .foregroundStyle(PetPalTheme.ink)
 
-                    Text(isConnecting ? "正在接入实时画面" : "实时画面已接入")
+                    Text(isConnecting ? "连接中" : "已连接")
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                         .foregroundStyle(isConnecting ? PetPalTheme.caramel : PetPalTheme.success)
                 }
@@ -360,14 +349,14 @@ private struct CameraConnectingState: View {
             }
 
             VStack(spacing: 8) {
-                Text("正在确认 \(camera.name) 的实时画面")
+                Text("正在连接 \(camera.name)")
                     .font(.system(size: 16, weight: .black, design: .rounded))
                     .foregroundStyle(PetPalTheme.ink)
                     .multilineTextAlignment(.center)
 
                 LoadingDots()
 
-                Text("保持这个页面 3 秒，我们会自动把连接状态切到就绪。")
+                Text("请稍等片刻，我们会自动完成连接。")
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(PetPalTheme.inkSoft)
                     .multilineTextAlignment(.center)
@@ -524,37 +513,20 @@ private struct CameraRadarScanView: View {
     var body: some View {
         PetPalShell(alignment: .center) {
             VStack(spacing: 20) {
-                HStack(alignment: .top, spacing: 12) {
-                    Button {
-                        onClose()
-                    } label: {
-                        Text("← 返回")
-                    }
-                    .buttonStyle(PetPalSmallGhostButtonStyle())
-
-                    Spacer(minLength: 8)
-
-                    VStack(spacing: 4) {
-                        Text("正在搜索附近摄像头")
-                            .font(.system(size: 18, weight: .black, design: .rounded))
-                            .foregroundStyle(PetPalTheme.ink)
-
-                        Text(scanStatusText)
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
-                            .foregroundStyle(PetPalTheme.caramel)
-                    }
-
-                    Spacer(minLength: 8)
-
-                    Color.clear
-                        .frame(width: 72, height: 1)
-                }
+                PetPalNavigationHeader(
+                    title: "搜索附近摄像头",
+                    onBack: onClose
+                )
                 .padding(.horizontal, 20)
-                .padding(.top, 18)
+
+                Text(scanStatusText)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(PetPalTheme.caramel)
+                    .padding(.top, -8)
 
                 radarPanel
 
-                Text("找到后点一下想绑定的摄像头，就会自动回到上一页继续配置。")
+                Text("点一下想绑定的设备，就会自动返回上一页。")
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(PetPalTheme.inkSoft)
                     .multilineTextAlignment(.center)

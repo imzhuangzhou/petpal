@@ -76,12 +76,12 @@ struct PetPalShell<Content: View>: View {
     var body: some View {
         ZStack(alignment: alignment) {
             PetPalBackground()
+                .ignoresSafeArea()
 
             content
                 .frame(maxWidth: 520)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
         }
-        .ignoresSafeArea()
     }
 }
 
@@ -589,13 +589,85 @@ struct PetPalChatHeader: View {
             }
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 16)
+        .padding(.top, 16)
+        .padding(.bottom, 16)
+        .safeAreaPadding(.top, 8)
         .background(Color(hex: "FFFBF5").opacity(0.92))
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color(hex: "E6D5C2").opacity(0.76))
                 .frame(height: 1)
         }
+    }
+}
+
+struct PetPalNavigationHeader: View {
+    let title: String
+    var backTitle: String = "返回"
+    var onBack: (() -> Void)? = nil
+    let trailing: AnyView?
+
+    init<Trailing: View>(
+        title: String,
+        backTitle: String = "返回",
+        onBack: (() -> Void)? = nil,
+        @ViewBuilder trailing: () -> Trailing
+    ) {
+        self.title = title
+        self.backTitle = backTitle
+        self.onBack = onBack
+        self.trailing = AnyView(trailing())
+    }
+
+    init(
+        title: String,
+        backTitle: String = "返回",
+        onBack: (() -> Void)? = nil
+    ) {
+        self.title = title
+        self.backTitle = backTitle
+        self.onBack = onBack
+        self.trailing = nil
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Group {
+                if let onBack {
+                    Button(action: onBack) {
+                        Label(backTitle, systemImage: "chevron.left")
+                            .labelStyle(.titleAndIcon)
+                    }
+                    .buttonStyle(PetPalSmallGhostButtonStyle())
+                    .accessibilityLabel(backTitle)
+                } else {
+                    Color.clear
+                        .frame(width: 84, height: 42)
+                }
+            }
+            .frame(width: 84, alignment: .leading)
+
+            Spacer(minLength: 0)
+
+            Text(title)
+                .font(.system(size: 18, weight: .black, design: .rounded))
+                .foregroundStyle(PetPalTheme.ink)
+                .multilineTextAlignment(.center)
+
+            Spacer(minLength: 0)
+
+            Group {
+                if let trailing {
+                    trailing
+                } else {
+                    Color.clear
+                        .frame(width: 84, height: 42)
+                }
+            }
+            .frame(width: 84, alignment: .trailing)
+        }
+        .padding(.top, 16)
+        .safeAreaPadding(.top, 8)
     }
 }
 

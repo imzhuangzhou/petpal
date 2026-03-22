@@ -18,9 +18,7 @@ struct CreatePetResponse: Decodable, Sendable {
     let species: String
     let photoURL: String
     let avatarURL: String
-    let voiceType: String
-    let voiceKey: String
-    let voiceLabel: String
+    let ownerAlias: String
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -28,8 +26,16 @@ struct CreatePetResponse: Decodable, Sendable {
         case species
         case photoURL = "photo_url"
         case avatarURL = "avatar_url"
-        case voiceType = "voice_type"
-        case voiceKey = "voice_key"
-        case voiceLabel = "voice_label"
+        case ownerAlias = "owner_alias"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        species = try container.decode(String.self, forKey: .species)
+        photoURL = try container.decode(String.self, forKey: .photoURL)
+        avatarURL = try container.decode(String.self, forKey: .avatarURL)
+        ownerAlias = try container.decodeIfPresent(String.self, forKey: .ownerAlias) ?? ""
     }
 }

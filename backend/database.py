@@ -37,6 +37,7 @@ def init_db():
             avatar_url TEXT DEFAULT '',
             language_style TEXT DEFAULT 'tsundere',
             style_prompt TEXT DEFAULT '',
+            owner_alias TEXT DEFAULT '',
             voice_type TEXT DEFAULT 'preset',
             voice_key TEXT DEFAULT 'cat-soft',
             voice_label TEXT DEFAULT '奶呼噜',
@@ -78,6 +79,10 @@ def init_db():
             role TEXT NOT NULL,
             content TEXT NOT NULL,
             image_url TEXT DEFAULT '',
+            message_type TEXT DEFAULT 'text',
+            media_kind TEXT DEFAULT '',
+            media_url TEXT DEFAULT '',
+            trigger_source TEXT DEFAULT 'chat',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (pet_id) REFERENCES pets(id)
         );
@@ -92,8 +97,13 @@ def init_db():
     ensure_column(cursor, "pets", "voice_key", "TEXT DEFAULT 'cat-soft'")
     ensure_column(cursor, "pets", "voice_label", "TEXT DEFAULT '奶呼噜'")
     ensure_column(cursor, "pets", "voice_sample_path", "TEXT DEFAULT ''")
+    ensure_column(cursor, "pets", "owner_alias", "TEXT DEFAULT ''")
     ensure_column(cursor, "cameras", "demo_video_path", "TEXT DEFAULT ''")
     ensure_column(cursor, "cameras", "demo_video_name", "TEXT DEFAULT ''")
+    ensure_column(cursor, "chat_history", "message_type", "TEXT DEFAULT 'text'")
+    ensure_column(cursor, "chat_history", "media_kind", "TEXT DEFAULT ''")
+    ensure_column(cursor, "chat_history", "media_url", "TEXT DEFAULT ''")
+    ensure_column(cursor, "chat_history", "trigger_source", "TEXT DEFAULT 'chat'")
 
     conn.commit()
     conn.close()

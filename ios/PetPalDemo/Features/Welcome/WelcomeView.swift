@@ -4,26 +4,7 @@ struct WelcomeView: View {
     @EnvironmentObject private var appStore: AppStore
     @State private var isSubmitting = false
     @State private var errorMessage: String?
-    private let onboardingSteps: [OnboardingStep] = [
-        .init(
-            number: "1",
-            symbolName: "pawprint.fill",
-            title: "添加爱宠",
-            subtitle: "名字·品种"
-        ),
-        .init(
-            number: "2",
-            symbolName: "video.fill",
-            title: "连接摄像头",
-            subtitle: "绑定视频"
-        ),
-        .init(
-            number: "3",
-            symbolName: "message.fill",
-            title: "开始聊天",
-            subtitle: "宠物对话"
-        ),
-    ]
+    private let onboardingSteps = ["添加爱宠", "连接摄像头", "开始聊天"]
 
     var body: some View {
         PetPalShell(alignment: .center) {
@@ -57,7 +38,7 @@ struct WelcomeView: View {
                                 ProgressView()
                                     .tint(.white)
                             } else {
-                                Text("开始我们的故事")
+                                Text("开始创建宠物")
                             }
                         }
                     }
@@ -120,75 +101,37 @@ struct WelcomeView: View {
     }
 
     private var stepsSection: some View {
-        HStack(alignment: .top, spacing: 10) {
-            ForEach(onboardingSteps) { step in
-                stepCard(step)
-            }
-        }
-        .frame(maxWidth: 360)
-    }
-
-    private func stepCard(_ step: OnboardingStep) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
-                stepBadge(step.number)
-
-                Spacer(minLength: 6)
-
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color(hex: "FFF3E4"))
-                        .frame(width: 34, height: 34)
-
-                    Image(systemName: step.symbolName)
-                        .font(.system(size: 14, weight: .black))
-                        .foregroundStyle(PetPalTheme.ink)
+        HStack(spacing: 10) {
+            ForEach(Array(onboardingSteps.enumerated()), id: \.offset) { index, title in
+                if index > 0 {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .black))
+                        .foregroundStyle(PetPalTheme.inkSoft.opacity(0.7))
                 }
-            }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(step.title)
-                    .font(.system(size: 14, weight: .black, design: .rounded))
+                Text(title)
+                    .font(.system(size: 13, weight: .black, design: .rounded))
                     .foregroundStyle(PetPalTheme.ink)
-                    .lineLimit(2)
-
-                Text(step.subtitle)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(PetPalTheme.inkSoft)
                     .lineLimit(1)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
-        .padding(12)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color.white.opacity(0.9))
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.white.opacity(0.88))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(PetPalTheme.line.opacity(0.8), lineWidth: 1)
         )
-    }
-
-    private func stepBadge(_ number: String) -> some View {
-        Circle()
-            .fill(
-                LinearGradient(
-                    colors: [Color(hex: "FFD8B5"), Color(hex: "F6BE95")],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .frame(width: 28, height: 28)
-            .overlay(
-                Text(number)
-                    .font(.system(size: 12, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-            )
+        .frame(maxWidth: 360)
     }
 
     private func onboardingErrorMessage(for error: Error) -> String {
-        let backendCommand = "cd /Users/justin/Documents/demo/petpal/backend && uvicorn main:app --reload --host 0.0.0.0 --port 8000"
+        let backendCommand = "cd /Users/justin/Documents/demo/petpal/backend && ./start.sh"
+        let healthCheckCommand = "curl http://127.0.0.1:8000/"
 
         if let apiError = error as? APIError {
             switch apiError {
@@ -196,12 +139,16 @@ struct WelcomeView: View {
                 return """
                 无法连接本地服务，请先启动后端后再试。
                 \(backendCommand)
+                启动后可执行：
+                \(healthCheckCommand)
                 """
             case .requestFailed:
                 return """
                 首屏请求没有连上本地服务（\(AppEnvironment.apiBaseURLString)）。
                 请先启动后端：
                 \(backendCommand)
+                启动后可执行：
+                \(healthCheckCommand)
                 """
             default:
                 return apiError.errorDescription ?? error.localizedDescription
@@ -210,13 +157,4 @@ struct WelcomeView: View {
 
         return error.localizedDescription
     }
-}
-
-private struct OnboardingStep: Identifiable {
-    let number: String
-    let symbolName: String
-    let title: String
-    let subtitle: String
-
-    var id: String { number }
 }

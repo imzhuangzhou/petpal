@@ -20,6 +20,12 @@ enum APIError: Error, LocalizedError, Sendable {
         case .invalidResponse:
             return "服务端返回了无效响应。"
         case .httpError(let statusCode, let message):
+            if statusCode == 502 || statusCode == 503 {
+                if let message, !message.isEmpty {
+                    return "外部服务调用失败：\(message)"
+                }
+                return "外部服务暂时不可用，请稍后重试。"
+            }
             if let message, !message.isEmpty {
                 return "请求失败（\(statusCode)）：\(message)"
             }
@@ -27,7 +33,7 @@ enum APIError: Error, LocalizedError, Sendable {
         case .noConnection:
             return "当前网络不可用，请检查连接。"
         case .timedOut:
-            return "请求超时，请稍后重试。"
+            return "请求超时。可能是本地后端未启动，或后端依赖的外部服务响应过慢。"
         case .cancelled:
             return "请求已取消。"
         case .encodingFailed(let message):
@@ -47,6 +53,8 @@ enum APIError: Error, LocalizedError, Sendable {
         switch urlError.code {
         case .notConnectedToInternet, .networkConnectionLost:
             return .noConnection
+        case .cannotConnectToHost, .cannotFindHost:
+            return .requestFailed("无法连接到后端服务。请确认后端已启动；模拟器联调请使用 127.0.0.1，真机请使用电脑的局域网 IP。")
         case .timedOut:
             return .timedOut
         case .cancelled:
