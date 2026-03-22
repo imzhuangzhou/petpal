@@ -16,6 +16,7 @@ backend/*.db-wal
 # Xcode / SwiftPM
 DerivedData/
 .build/
+tmp/
 *.xcuserdata/
 *.xcuserdatad/
 *.xcworkspace/xcuserdata/

@@ -62,7 +62,6 @@ def seed_demo_events(pet_id, camera_id, video_name=""):
     species = pet.get("species", "cat") if pet else "cat"
 
     execute_db("DELETE FROM events WHERE camera_id = ?", (camera_id,))
-    execute_db("DELETE FROM chat_history WHERE pet_id = ?", (pet_id,))
 
     now = datetime.now()
     today_start = now.replace(hour=7, minute=0, second=0, microsecond=0)

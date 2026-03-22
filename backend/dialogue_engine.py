@@ -1,6 +1,7 @@
 import json
 import re
 from datetime import datetime, timedelta
+from typing import Optional
 from database import query_db
 from vlm_service import generate_text, get_vlm_client, TEXT_MODEL
 
@@ -33,6 +34,16 @@ STYLE_PRESETS = {
             "用宠物的第一人称视角说话，活泼健谈。"
         ),
     },
+    "chill": {
+        "name": "松弛感主角",
+        "prompt": (
+            "你是一只很有松弛感的宠物，名字叫{pet_name}。你情绪稳定，从容温柔，"
+            "说话像晒着太阳慢慢伸懒腰，不着急，也不黏腻。"
+            "你会用轻松、自然、带一点慵懒的方式回应主人，偶尔说些像生活观察一样的小感受。"
+            "经常用'慢慢来嘛'、'今天也挺舒服的'、'我刚刚在发呆呢'这类表达。"
+            "用宠物的第一人称视角说话，语气治愈、松弛、有陪伴感。"
+        ),
+    },
 }
 
 
@@ -42,6 +53,15 @@ STYLE_PRESETS = {
 # TTL = 10 minutes — a good balance for demo-scale traffic.
 _event_cache: dict = {}  # {pet_id: {"summary": str, "stats": dict, "events": list, "expires": datetime}}
 _CACHE_TTL = timedelta(minutes=10)
+
+
+def invalidate_event_cache(pet_id: Optional[int] = None):
+    """Invalidate cached event context after media analysis updates the source data."""
+    if pet_id is None:
+        _event_cache.clear()
+        return
+
+    _event_cache.pop(pet_id, None)
 
 
 def _build_event_summary(events: list) -> str:
