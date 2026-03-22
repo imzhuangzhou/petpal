@@ -131,20 +131,20 @@ struct PetPalBackground: View {
 
 struct PetPalHeroCard: View {
     let badge: String
-    let stamp: String
+    let stampAsset: PetPalArtAsset
     let stampImageURL: URL?
     let title: String
     let subtitle: String
 
     init(
         badge: String,
-        stamp: String,
+        stampAsset: PetPalArtAsset,
         stampImageURL: URL? = nil,
         title: String,
         subtitle: String
     ) {
         self.badge = badge
-        self.stamp = stamp
+        self.stampAsset = stampAsset
         self.stampImageURL = stampImageURL
         self.title = title
         self.subtitle = subtitle
@@ -170,7 +170,7 @@ struct PetPalHeroCard: View {
                 PetPalCapsuleLabel(text: badge, style: .hero)
 
                 HStack(alignment: .center, spacing: 16) {
-                    PetPalStamp(emoji: stamp, imageURL: stampImageURL)
+                    PetPalStamp(fallbackAsset: stampAsset, imageURL: stampImageURL)
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text(title)
@@ -327,7 +327,7 @@ struct PetPalCapsuleLabel: View {
 }
 
 struct PetPalStamp: View {
-    let emoji: String
+    let fallbackAsset: PetPalArtAsset
     let imageURL: URL?
 
     var body: some View {
@@ -355,8 +355,8 @@ struct PetPalStamp: View {
         .overlay(
             PetPalImageFill(
                 imageURL: imageURL,
-                fallbackEmoji: emoji,
-                emojiSize: 34,
+                fallbackAsset: fallbackAsset,
+                artSize: 34,
                 contentMode: .fill
             )
             .clipShape(RoundedRectangle(cornerRadius: 23, style: .continuous))
@@ -369,8 +369,8 @@ struct PetPalStamp: View {
 
 struct PetPalImageFill: View {
     let imageURL: URL?
-    let fallbackEmoji: String
-    let emojiSize: CGFloat
+    let fallbackAsset: PetPalArtAsset
+    let artSize: CGFloat
     var contentMode: ContentMode = .fill
 
     var body: some View {
@@ -399,13 +399,19 @@ struct PetPalImageFill: View {
     private var fallbackContent: some View {
         ZStack {
             LinearGradient(
-                colors: [Color(hex: "FFD8B4"), Color(hex: "F8B78D")],
+                colors: fallbackAsset.placeholderColors,
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
 
-            Text(fallbackEmoji)
-                .font(.system(size: emojiSize))
+            Circle()
+                .fill(.white.opacity(0.16))
+                .frame(width: artSize * 1.25, height: artSize * 1.25)
+                .offset(x: artSize * 0.3, y: -artSize * 0.35)
+
+            PetPalArtImage(asset: fallbackAsset)
+                .frame(width: artSize, height: artSize)
+                .shadow(color: .white.opacity(0.18), radius: 6, y: 1)
         }
     }
 }
@@ -511,14 +517,14 @@ struct PetPalLoadingOverlay: View {
 }
 
 struct PetPalChatHeader: View {
-    let avatar: String
+    let avatar: PetPalArtAsset
     let avatarImageURL: URL?
     let title: String
     let subtitle: String
     let trailing: AnyView?
 
     init<Trailing: View>(
-        avatar: String,
+        avatar: PetPalArtAsset,
         avatarImageURL: URL? = nil,
         title: String,
         subtitle: String,
@@ -532,7 +538,7 @@ struct PetPalChatHeader: View {
     }
 
     init(
-        avatar: String,
+        avatar: PetPalArtAsset,
         avatarImageURL: URL? = nil,
         title: String,
         subtitle: String
@@ -558,8 +564,8 @@ struct PetPalChatHeader: View {
                 .overlay(
                     PetPalImageFill(
                         imageURL: avatarImageURL,
-                        fallbackEmoji: avatar,
-                        emojiSize: 24,
+                        fallbackAsset: avatar,
+                        artSize: 24,
                         contentMode: .fill
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))

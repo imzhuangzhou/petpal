@@ -39,7 +39,7 @@ struct SettingsView: View {
 
                         PetPalHeroCard(
                             badge: "Profile",
-                            stamp: petAvatar,
+                            stampAsset: petAvatar,
                             stampImageURL: petAvatarImageURL,
                             title: appStore.session.petName.ifEmpty("PetPal"),
                             subtitle: "主人是 \(appStore.session.nickname.ifEmpty("你"))，当前宠物种类为 \(appStore.session.petSpecies == "dog" ? "狗狗" : "猫咪")。"
@@ -170,8 +170,8 @@ struct SettingsView: View {
         }
     }
 
-    private var petAvatar: String {
-        appStore.session.petSpecies == "dog" ? "🐶" : "🐱"
+    private var petAvatar: PetPalArtAsset {
+        .pet(for: appStore.session.petSpecies)
     }
 
     private var currentVoiceDisplayName: String {

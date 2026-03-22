@@ -19,7 +19,7 @@ struct DemoVideoUploadView: View {
                     VStack(spacing: 16) {
                         PetPalHeroCard(
                             badge: "Camera setup",
-                            stamp: "📡",
+                            stampAsset: .featureRadar,
                             title: "下一环节，接入今天的画面",
                             subtitle: "宠物档案已经建好，现在再接入摄像头上下文，聊天和提醒就能围绕今天的动态展开。"
                         )
