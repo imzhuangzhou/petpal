@@ -37,6 +37,7 @@ struct PetSetupView: View {
             GeometryReader { geometry in
                 let contentWidth = min(max(geometry.size.width - 40, 280), 520)
                 let isCompactLayout = contentWidth < 360
+                let viewportHeight = geometry.size.height
 
                 ZStack {
                     ScrollView(showsIndicators: false) {
@@ -58,7 +59,11 @@ struct PetSetupView: View {
                             PetPalPanelCard {
                                 switch currentStep {
                                 case 0:
-                                    stepOneContent(contentWidth: contentWidth, isCompactLayout: isCompactLayout)
+                                    stepOneContent(
+                                        contentWidth: contentWidth,
+                                        isCompactLayout: isCompactLayout,
+                                        viewportHeight: viewportHeight
+                                    )
                                 default:
                                     stepTwoContent(contentWidth: contentWidth, isCompactLayout: isCompactLayout)
                                 }
@@ -258,8 +263,12 @@ struct PetSetupView: View {
     }
 
     @ViewBuilder
-    private func stepOneContent(contentWidth _: CGFloat, isCompactLayout: Bool) -> some View {
-        stepOneArtworkCard(isCompactLayout: isCompactLayout)
+    private func stepOneContent(
+        contentWidth _: CGFloat,
+        isCompactLayout: Bool,
+        viewportHeight: CGFloat
+    ) -> some View {
+        stepOneArtworkCard(isCompactLayout: isCompactLayout, viewportHeight: viewportHeight)
     }
 
     @ViewBuilder
@@ -293,8 +302,8 @@ struct PetSetupView: View {
     }
 
     @ViewBuilder
-    private func stepOneArtworkCard(isCompactLayout: Bool) -> some View {
-        let previewHeight = isCompactLayout ? 220.0 : 250.0
+    private func stepOneArtworkCard(isCompactLayout: Bool, viewportHeight: CGFloat) -> some View {
+        let previewHeight = artworkPreviewHeight(isCompactLayout: isCompactLayout, viewportHeight: viewportHeight)
 
         PetPalSurfaceCard {
             Text("上传 1 张清晰照片，系统会生成头像。")
@@ -409,6 +418,13 @@ struct PetSetupView: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(avatarBorderColor, lineWidth: 1.2)
         )
+    }
+
+    private func artworkPreviewHeight(isCompactLayout: Bool, viewportHeight: CGFloat) -> CGFloat {
+        let minimumHeight = isCompactLayout ? 144.0 : 156.0
+        let preferredHeight = isCompactLayout ? 156.0 : 176.0
+        let scaledHeight = viewportHeight * (isCompactLayout ? 0.2 : 0.225)
+        return max(minimumHeight, min(preferredHeight, scaledHeight))
     }
 
     private func optionColumns(for contentWidth: CGFloat) -> [GridItem] {
@@ -899,9 +915,11 @@ private struct PetSetupArtworkPreview: View {
                     endPoint: .bottomTrailing
                 )
             )
+            .frame(maxWidth: .infinity)
             .frame(height: height)
             .overlay {
                 content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
@@ -915,6 +933,8 @@ private struct PetSetupArtworkPreview: View {
                     image
                         .resizable()
                         .scaledToFill()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
                 case .empty, .failure:
                     placeholder
                 @unknown default:

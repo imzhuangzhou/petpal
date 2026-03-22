@@ -130,6 +130,13 @@ class PromptTests(unittest.TestCase):
         self.assertIn("不需要严格复现参考图里的原始姿势", prompt)
         self.assertIn("PetPal App 现有视觉风格统一", prompt)
         self.assertIn("绝不能是写实摄影风", prompt)
+        self.assertIn("身份一致性优先级高于风格统一", prompt)
+
+    def test_build_pet_avatar_prompt_embeds_identity_summary(self):
+        prompt = vlm_service._build_pet_avatar_prompt("cat", "毛色：银渐层；眼睛：绿色")
+
+        self.assertIn("毛色：银渐层；眼睛：绿色", prompt)
+        self.assertIn("请逐项吸收并体现在最终头像里", prompt)
 
     def test_build_pet_avatar_negative_prompt_blocks_unwanted_outputs(self):
         prompt = vlm_service._build_pet_avatar_negative_prompt()
@@ -172,6 +179,47 @@ class ResizeHelperTests(unittest.TestCase):
         self.assertEqual(image_bytes, original_bytes)
 
 
+class IdentityExtractionTests(unittest.TestCase):
+    def test_extract_pet_avatar_identity_summary_parses_json_code_block(self):
+        fake_response = _AttrObject(
+            choices=[
+                _AttrObject(
+                    message=_AttrObject(
+                        content=(
+                            "```json\n"
+                            '{"coat_colors":["银灰","白色"],"pattern":"额头有浅色M纹","eye_details":"绿色偏圆眼","ear_shape":"直立三角耳","face_shape":"圆脸","nose_muzzle":"粉鼻头、口鼻区偏白","fur_texture":"短毛偏蓬松","distinctive_traits":["下巴白毛"],"accessories":"","summary":"银灰白相间、绿眼、圆脸粉鼻的猫"}'
+                            "\n```"
+                        )
+                    )
+                )
+            ]
+        )
+
+        with patch("vlm_service._run_dashscope_completion", return_value=fake_response), patch(
+            "vlm_service.DASHSCOPE_API_KEY",
+            "test-key",
+        ):
+            summary = vlm_service._extract_pet_avatar_identity_summary(
+                b"reference-bytes",
+                "image/jpeg",
+                "cat",
+            )
+
+        self.assertIn("毛色：银灰、白色", summary)
+        self.assertIn("花纹：额头有浅色M纹", summary)
+        self.assertIn("整体识别摘要：银灰白相间、绿眼、圆脸粉鼻的猫", summary)
+
+    def test_extract_pet_avatar_identity_summary_skips_without_dashscope_key(self):
+        with patch("vlm_service.DASHSCOPE_API_KEY", ""):
+            summary = vlm_service._extract_pet_avatar_identity_summary(
+                b"reference-bytes",
+                "image/jpeg",
+                "cat",
+            )
+
+        self.assertEqual(summary, "")
+
+
 class GeneratePetAvatarTests(unittest.TestCase):
     def test_generate_pet_avatar_uses_fast_square_config(self):
         class FakeModels:
@@ -198,6 +246,9 @@ class GeneratePetAvatarTests(unittest.TestCase):
         with patch("vlm_service.get_image_client", return_value=fake_client), patch(
             "vlm_service._load_pet_avatar_reference_image",
             return_value=(b"reference-bytes", "image/jpeg"),
+        ), patch(
+            "vlm_service._extract_pet_avatar_identity_summary",
+            return_value="毛色：奶油白；眼睛：琥珀色",
         ):
             image_bytes, mime_type = vlm_service.generate_pet_avatar("/tmp/pet.jpg", "dog")
 
@@ -205,10 +256,49 @@ class GeneratePetAvatarTests(unittest.TestCase):
         self.assertEqual(mime_type, "image/png")
         self.assertTrue(fake_client.closed)
 
+        self.assertEqual(
+            fake_client.models.last_kwargs["prompt"],
+            vlm_service._build_pet_avatar_prompt("dog", "毛色：奶油白；眼睛：琥珀色"),
+        )
         config = fake_client.models.last_kwargs["config"]
         self.assertEqual(config.aspect_ratio, "1:1")
         self.assertEqual(config.base_steps, 35)
         self.assertEqual(config.negative_prompt, vlm_service._build_pet_avatar_negative_prompt())
+
+    def test_generate_pet_avatar_falls_back_when_identity_extraction_fails(self):
+        class FakeModels:
+            def __init__(self):
+                self.last_kwargs = None
+
+            def edit_image(self, **kwargs):
+                self.last_kwargs = kwargs
+                generated = _AttrObject(
+                    image=_AttrObject(image_bytes=b"generated-avatar", mime_type="image/png")
+                )
+                return _AttrObject(generated_images=[generated])
+
+        class FakeImageClient:
+            def __init__(self):
+                self.models = FakeModels()
+
+            def close(self):
+                return None
+
+        fake_client = FakeImageClient()
+
+        with patch("vlm_service.get_image_client", return_value=fake_client), patch(
+            "vlm_service._load_pet_avatar_reference_image",
+            return_value=(b"reference-bytes", "image/jpeg"),
+        ), patch(
+            "vlm_service._extract_pet_avatar_identity_summary",
+            side_effect=RuntimeError("vlm failed"),
+        ):
+            vlm_service.generate_pet_avatar("/tmp/pet.jpg", "cat")
+
+        self.assertEqual(
+            fake_client.models.last_kwargs["prompt"],
+            vlm_service._build_pet_avatar_prompt("cat", ""),
+        )
 
 
 if __name__ == "__main__":

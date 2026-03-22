@@ -93,13 +93,29 @@ def get_image_client():
     )
 
 
-def _build_pet_avatar_prompt(species: str) -> str:
+def _build_pet_avatar_prompt(species: str, identity_summary: str = "") -> str:
     species_label = "狗狗" if species == "dog" else "猫咪"
+    identity_constraints = (
+        "身份一致性优先级高于风格统一。你必须严格保留这只宠物的可识别身份特征，"
+        "不能为了追求通用可爱而替换、弱化或擅自改动这些关键识别点。"
+    )
+    if identity_summary:
+        identity_constraints += (
+            "以下是从参考图中提取出的身份特征摘要，请逐项吸收并体现在最终头像里："
+            f"{identity_summary}。"
+        )
+    else:
+        identity_constraints += (
+            "请尤其保留毛发主色与辅色、花纹分布、眼睛颜色、耳朵形状、脸型、鼻口区域和毛发质感。"
+        )
+
     return (
         f"基于输入参考图，为这只{species_label}生成 1 张用于 PetPal App 的宠物头像插画。"
         "这是一个严格的头像生成任务，不是照片重绘任务。最终成品必须严格为 1:1 正方形构图，"
         "不能是横图、竖图、接近正方形但不精确的比例，也不能出现主体被裁切、头顶缺失、耳朵被截断或主体偏到边缘的情况。"
-        "核心目标是保留这只宠物的身份特征，而不是复刻原图动作。请优先准确提取并保留以下稳定特征："
+        "核心目标是保留这只宠物的身份特征，而不是复刻原图动作。"
+        f"{identity_constraints}"
+        "请优先准确提取并保留以下稳定特征："
         "毛发主色与辅色、花纹和颜色分布位置、眼睛颜色与眼神气质、耳朵形状、脸型、鼻口区域细节、长毛或短毛质感与整体轮廓特征。"
         "不需要严格复现参考图里的原始姿势、角度、动作或场景。允许将动作简化为更适合头像展示的自然静态姿态，只要让人一眼认出还是同一只宠物即可。"
         "画风必须与 PetPal App 现有视觉风格统一：温暖、治愈、奶油感、低饱和、圆润、干净、精致，像高质量角色头像插画或宠物贴纸。"
@@ -117,6 +133,117 @@ def _build_pet_avatar_negative_prompt() -> str:
         "夸张动作，完全复刻原图姿势，主体过小，非正方形构图，头部或耳朵被裁切，多只宠物，人类，"
         "文字，水印，项圈，衣服，玩具，3D 渲染，赛博色，高饱和霓虹色"
     )
+
+
+def _build_pet_identity_extraction_prompt(species: str) -> str:
+    species_label = "狗狗" if species == "dog" else "猫咪"
+    return (
+        f"请观察这张{species_label}参考图，只提取能帮助后续头像生成保持“同一只宠物身份”的稳定特征。"
+        "忽略光照、拍摄噪点、背景杂物和瞬时动作，不要脑补看不清的细节；看不清就填写空字符串或空数组。"
+        "请严格输出 JSON，不要输出代码块，不要输出额外说明。格式如下："
+        '{"coat_colors":[],"pattern":"","eye_details":"","ear_shape":"","face_shape":"","nose_muzzle":"","fur_texture":"","distinctive_traits":[],"accessories":"","summary":""}'
+    )
+
+
+def _extract_json_object(content: str) -> dict:
+    stripped = content.strip()
+    if stripped.startswith("```"):
+        lines = [line for line in stripped.splitlines() if not line.strip().startswith("```")]
+        stripped = "\n".join(lines).strip()
+
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise ValueError("No JSON object found")
+
+    payload = json.loads(stripped[start : end + 1])
+    if not isinstance(payload, dict):
+        raise ValueError("JSON payload is not an object")
+    return payload
+
+
+def _normalize_identity_feature_value(value) -> str:
+    if isinstance(value, list):
+        parts = [str(item).strip() for item in value if str(item).strip()]
+        return "、".join(parts)
+
+    if isinstance(value, str):
+        return value.strip()
+
+    return ""
+
+
+def _summarize_pet_identity_features(features: dict) -> str:
+    field_labels = [
+        ("coat_colors", "毛色"),
+        ("pattern", "花纹"),
+        ("eye_details", "眼睛"),
+        ("ear_shape", "耳朵"),
+        ("face_shape", "脸型"),
+        ("nose_muzzle", "鼻口"),
+        ("fur_texture", "毛发质感"),
+        ("distinctive_traits", "独特识别点"),
+        ("accessories", "配饰"),
+    ]
+    parts = []
+    for field_name, label in field_labels:
+        value = _normalize_identity_feature_value(features.get(field_name))
+        if value:
+            parts.append(f"{label}：{value}")
+
+    summary = _normalize_identity_feature_value(features.get("summary"))
+    if summary:
+        parts.append(f"整体识别摘要：{summary}")
+
+    return "；".join(parts)
+
+
+def _extract_pet_avatar_identity_summary(
+    reference_image_bytes: bytes,
+    mime_type: str,
+    species: str,
+) -> str:
+    if not DASHSCOPE_API_KEY:
+        logger.info("Skipping pet identity extraction because DASHSCOPE_API_KEY is not configured.")
+        return ""
+
+    base64_image = base64.b64encode(reference_image_bytes).decode("utf-8")
+    response = _run_dashscope_completion(
+        operation="宠物头像身份特征提取",
+        model=VLM_MODEL,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime_type};base64,{base64_image}"
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": _build_pet_identity_extraction_prompt(species),
+                    },
+                ],
+            }
+        ],
+        max_tokens=400,
+    )
+
+    content = response.choices[0].message.content.strip()
+    try:
+        features = _extract_json_object(content)
+    except Exception:
+        logger.warning("Pet identity extraction returned non-JSON content: %s", content)
+        return content.replace("\n", " ").strip()
+
+    summary = _summarize_pet_identity_features(features)
+    if summary:
+        logger.info("Extracted pet identity summary: %s", summary)
+    else:
+        logger.warning("Pet identity extraction returned empty structured features: %s", features)
+    return summary
 
 
 def _extract_image_error_detail(exc: Exception) -> str:
@@ -358,7 +485,6 @@ def generate_pet_avatar(image_path: str, species: str) -> tuple[bytes, str]:
         Tuple of (image bytes, mime type)
     """
     client = get_image_client()
-    prompt = _build_pet_avatar_prompt(species)
     negative_prompt = _build_pet_avatar_negative_prompt()
     started_at = time.perf_counter()
 
@@ -373,6 +499,16 @@ def generate_pet_avatar(image_path: str, species: str) -> tuple[bytes, str]:
     result = None
     try:
         image_bytes, mime_type = _load_pet_avatar_reference_image(image_path)
+        identity_summary = ""
+        try:
+            identity_summary = _extract_pet_avatar_identity_summary(
+                image_bytes,
+                mime_type,
+                species,
+            )
+        except Exception as exc:
+            logger.warning("Pet identity extraction failed, falling back to single-stage generation: %s", exc)
+        prompt = _build_pet_avatar_prompt(species, identity_summary)
 
         for attempt in range(1, VERTEX_IMAGE_MAX_RETRIES + 1):
             try:
