@@ -14,6 +14,7 @@ struct PetSetupView: View {
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @State private var selectedReferencePhotoItem: PhotosPickerItem?
+    @State private var isShowingReferencePhotoPicker = false
     @State private var referencePhotoLocalURL: URL?
     @State private var referencePhotoRemotePath = ""
     @State private var generatedAvatarRemotePath = ""
@@ -121,10 +122,20 @@ struct PetSetupView: View {
                 await importReferencePhoto()
             }
         }
+        .photosPicker(
+            isPresented: $isShowingReferencePhotoPicker,
+            selection: $selectedReferencePhotoItem,
+            matching: .images,
+            photoLibrary: .shared()
+        )
         .onAppear {
             restoreDraftIfNeeded()
         }
+        .onChange(of: currentPetSetupDraft) { _, newDraft in
+            appStore.applyPetSetupDraft(newDraft)
+        }
         .onDisappear {
+            syncPetSetupDraft()
             cleanupReferencePhotoFile()
         }
     }
@@ -204,6 +215,10 @@ struct PetSetupView: View {
         }
     }
 
+    private func syncPetSetupDraft() {
+        appStore.applyPetSetupDraft(currentPetSetupDraft)
+    }
+
     private func restoreDraftIfNeeded() {
         guard !hasRestoredDraft else { return }
         hasRestoredDraft = true
@@ -274,6 +289,7 @@ struct PetSetupView: View {
                 if currentStep > 0 {
                     Button("上一步") {
                         let previousStep = max(currentStep - 1, 0)
+                        syncPetSetupDraft()
                         withAnimation(.easeInOut(duration: 0.22)) {
                             currentStep = previousStep
                         }
@@ -419,7 +435,7 @@ struct PetSetupView: View {
     }
 
     @ViewBuilder
-    private func stepOneArtworkCard(isCompactLayout: Bool, viewportHeight _: CGFloat) -> some View {
+    private func stepOneArtworkCard(isCompactLayout _: Bool, viewportHeight _: CGFloat) -> some View {
         PetPalSurfaceCard {
             Text("上传照片生成专属头像，或直接使用默认头像。")
                 .font(.system(size: 14, weight: .bold, design: .rounded))
@@ -451,12 +467,14 @@ struct PetSetupView: View {
                     case .generated:
                         PetSetupArtworkPreview(
                             remoteImageURL: generatedAvatarResolvedURL,
-                            fallbackAsset: selectedSpecies.artAsset
+                            fallbackAsset: selectedSpecies.artAsset,
+                            onReplacePhoto: presentReferencePhotoPicker,
+                            onRemoveAvatar: removeGeneratedAvatar
                         )
                     case .failed:
                         PetSetupAvatarPlaceholder(
                             title: "这次没有成功生成卡通形象",
-                            subtitle: avatarMessage?.ifEmpty("你可以重试生成，也可以直接更换另一张参考照片。") ?? "你可以重试生成，也可以直接更换另一张参考照片。",
+                            subtitle: avatarMessage?.ifEmpty("换一张照片再试试，会更稳妥。") ?? "换一张照片再试试，会更稳妥。",
                             accentAsset: .avatarPalette
                         )
                     }
@@ -474,10 +492,8 @@ struct PetSetupView: View {
                     }
 
                     switch avatarGenerationState {
-                    case .generated:
-                        avatarActionButtons(isCompactLayout: isCompactLayout, retryTitle: "重新生成")
                     case .failed:
-                        avatarActionButtons(isCompactLayout: isCompactLayout, retryTitle: "重试生成")
+                        avatarReplacePhotoButton(title: "重新选择照片")
                     default:
                         EmptyView()
                     }
@@ -589,39 +605,27 @@ struct PetSetupView: View {
         }
     }
 
-    @ViewBuilder
-    private func avatarActionButtons(isCompactLayout: Bool, retryTitle: String) -> some View {
-        if isCompactLayout {
-            VStack(spacing: 10) {
-                avatarRetryButton(title: retryTitle)
-                avatarReplacePhotoButton
-            }
-        } else {
-            HStack(spacing: 10) {
-                avatarRetryButton(title: retryTitle)
-                avatarReplacePhotoButton
-            }
-        }
-    }
-
-    private func avatarRetryButton(title: String) -> some View {
+    private func avatarReplacePhotoButton(title: String) -> some View {
         Button(title) {
-            Task {
-                await retryAvatarGeneration()
-            }
+            presentReferencePhotoPicker()
         }
         .buttonStyle(PetPalSecondaryButtonStyle())
     }
 
-    private var avatarReplacePhotoButton: some View {
-        PhotosPicker(
-            selection: $selectedReferencePhotoItem,
-            matching: .images,
-            photoLibrary: .shared()
-        ) {
-            Text("更换照片")
-        }
-        .buttonStyle(PetPalSecondaryButtonStyle())
+    private func presentReferencePhotoPicker() {
+        errorMessage = nil
+        isShowingReferencePhotoPicker = true
+    }
+
+    private func removeGeneratedAvatar() {
+        errorMessage = nil
+        avatarInputMode = .photoGenerated
+        selectedReferencePhotoItem = nil
+        cleanupReferencePhotoFile()
+        referencePhotoRemotePath = ""
+        generatedAvatarRemotePath = ""
+        avatarGenerationState = .idle
+        avatarMessage = "已移除当前头像，请重新选择照片。"
     }
 
     private func optionColumns(for contentWidth: CGFloat) -> [GridItem] {
@@ -755,6 +759,7 @@ struct PetSetupView: View {
         }
 
         focusedField = nil
+        syncPetSetupDraft()
         withAnimation(.easeInOut(duration: 0.22)) {
             currentStep = 1
         }
@@ -788,22 +793,13 @@ struct PetSetupView: View {
         withAnimation(.easeInOut(duration: 0.22)) {
             currentStep = 0
         }
+        syncPetSetupDraft()
         appStore.onboardingRoute = .petSetup(step: 0)
 
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(260))
             presentStepOneBlocker(blocker, scrollProxy: scrollProxy)
         }
-    }
-
-    private func retryAvatarGeneration() async {
-        guard let referencePhotoLocalURL else {
-            avatarGenerationState = .failed
-            avatarMessage = "找不到本地参考照片，请重新上传。"
-            return
-        }
-
-        await generateAvatar(from: referencePhotoLocalURL)
     }
 
     private func importReferencePhoto() async {
@@ -1174,6 +1170,8 @@ struct PetSetupAvatarPlaceholder: View {
 struct PetSetupArtworkPreview: View {
     let remoteImageURL: URL?
     let fallbackAsset: PetPalArtAsset
+    var onReplacePhoto: (() -> Void)? = nil
+    var onRemoveAvatar: (() -> Void)? = nil
 
     var body: some View {
         PetPalAvatarSurface(cornerRadius: 24) {
@@ -1183,6 +1181,30 @@ struct PetSetupArtworkPreview: View {
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(1, contentMode: .fit)
+        .overlay(alignment: .topTrailing) {
+            if let onReplacePhoto, let onRemoveAvatar {
+                Menu {
+                    Button {
+                        onReplacePhoto()
+                    } label: {
+                        Label("更换照片", systemImage: "photo")
+                    }
+
+                    Button(role: .destructive) {
+                        onRemoveAvatar()
+                    } label: {
+                        Label("移除当前头像", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 16, weight: .black))
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(PetPalIconGhostButtonStyle())
+                .padding(12)
+                .accessibilityLabel("头像更多操作")
+            }
+        }
     }
 
     @ViewBuilder
@@ -1249,7 +1271,7 @@ struct PetSetupAvatarLoadingCard: View {
                         .font(.system(size: 16, weight: .black, design: .rounded))
                         .foregroundStyle(PetPalTheme.ink)
 
-                    Text("请稍等片刻，完成后可以更换照片或继续下一步。")
+                    Text("请稍等片刻，完成后可以继续下一步，或重新选择照片。")
                         .font(.system(size: 13, weight: .medium, design: .rounded))
                         .foregroundStyle(PetPalTheme.inkSoft)
                         .multilineTextAlignment(.center)
@@ -1326,7 +1348,7 @@ private enum StepOneBlocker: Equatable {
         case .avatarGenerating:
             return "头像还在生成中，生成完成后就能继续下一步。"
         case .avatarGenerationFailed:
-            return "头像这次还没准备好，换张照片或重新生成后就能继续。"
+            return "头像这次还没准备好，换张照片后就能继续。"
         }
     }
 

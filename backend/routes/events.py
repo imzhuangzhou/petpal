@@ -1,10 +1,17 @@
+import os
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from database import execute_db, query_db
+from video_processor import clip_video_segment, get_video_duration
 
 router = APIRouter(prefix="/api", tags=["events"])
+
+BACKEND_DIR = os.path.dirname(os.path.dirname(__file__))
+UPLOADS_DIR = os.path.join(BACKEND_DIR, "uploads")
+EVENT_CLIP_PRE_ROLL_SECONDS = 1.5
+EVENT_CLIP_POST_ROLL_SECONDS = 1.5
 
 
 CAT_DEMO_SCHEDULE = [
@@ -108,6 +115,69 @@ def get_events(pet_id: int, limit: int = 50):
         (pet_id, limit),
     )
     return events
+
+
+def _resolve_media_path(media_url: str) -> str:
+    if not media_url.startswith("/media/"):
+        raise HTTPException(status_code=400, detail="视频路径格式无效。")
+
+    relative_path = media_url.removeprefix("/media/")
+    resolved_path = os.path.realpath(os.path.join(UPLOADS_DIR, relative_path))
+    uploads_root = os.path.realpath(UPLOADS_DIR)
+    if not resolved_path.startswith(uploads_root + os.sep) and resolved_path != uploads_root:
+        raise HTTPException(status_code=400, detail="视频路径无效。")
+
+    return resolved_path
+
+
+@router.get("/events/{event_id}/clip")
+def get_event_clip(event_id: int):
+    event = query_db(
+        """
+        SELECT e.id, e.video_start_seconds, e.video_end_seconds, c.demo_video_path
+        FROM events e
+        LEFT JOIN cameras c ON c.id = e.camera_id
+        WHERE e.id = ?
+        """,
+        (event_id,),
+        one=True,
+    )
+    if not event:
+        raise HTTPException(status_code=404, detail="找不到对应事件。")
+
+    video_start_seconds = event.get("video_start_seconds")
+    video_end_seconds = event.get("video_end_seconds")
+    if video_start_seconds is None or video_end_seconds is None:
+        raise HTTPException(status_code=409, detail="该事件缺少视频时间范围，请重新上传并分析视频。")
+
+    demo_video_path = (event.get("demo_video_path") or "").strip()
+    if not demo_video_path:
+        raise HTTPException(status_code=409, detail="该事件未关联原始视频。")
+
+    source_video_path = _resolve_media_path(demo_video_path)
+    if not os.path.exists(source_video_path):
+        raise HTTPException(status_code=404, detail="原始视频不存在，请重新上传。")
+
+    try:
+        video_duration = get_video_duration(source_video_path)
+        clip_start_seconds = max(float(video_start_seconds) - EVENT_CLIP_PRE_ROLL_SECONDS, 0.0)
+        clip_end_seconds = float(video_end_seconds) + EVENT_CLIP_POST_ROLL_SECONDS
+        if video_duration > 0:
+            clip_end_seconds = min(clip_end_seconds, video_duration)
+
+        if clip_end_seconds <= clip_start_seconds:
+            raise HTTPException(status_code=409, detail="事件片段时间范围无效。")
+
+        clip_url = clip_video_segment(source_video_path, clip_start_seconds, clip_end_seconds)
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return {
+        "event_id": event_id,
+        "video_clip_url": clip_url,
+    }
 
 
 @router.post("/demo/init")

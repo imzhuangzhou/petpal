@@ -107,6 +107,10 @@ final class APIClient {
         try await fetch(endpoint: Endpoint(path: "/api/debug/video-analysis/\(cameraID)"))
     }
 
+    func fetchEventClip(eventID: Int) async throws -> EventClipResponse {
+        try await fetch(endpoint: Endpoint(path: "/api/events/\(eventID)/clip"))
+    }
+
     func sendChat(petID: Int, message: String) async throws -> ChatReplyResponse {
         try await send(
             endpoint: Endpoint(path: "/api/chat", method: .post),
@@ -386,6 +390,8 @@ struct VideoAnalysisDebugEvent: Decodable, Sendable, Hashable, Identifiable {
     let description: String
     let timestamp: String
     let durationSeconds: Double
+    let videoStartSeconds: Double?
+    let videoEndSeconds: Double?
     let frameURL: String
 
     enum CodingKeys: String, CodingKey {
@@ -394,6 +400,18 @@ struct VideoAnalysisDebugEvent: Decodable, Sendable, Hashable, Identifiable {
         case description
         case timestamp
         case durationSeconds = "duration_seconds"
+        case videoStartSeconds = "video_start_seconds"
+        case videoEndSeconds = "video_end_seconds"
         case frameURL = "frame_url"
+    }
+}
+
+struct EventClipResponse: Decodable, Sendable {
+    let eventID: Int
+    let videoClipURL: String
+
+    enum CodingKeys: String, CodingKey {
+        case eventID = "event_id"
+        case videoClipURL = "video_clip_url"
     }
 }

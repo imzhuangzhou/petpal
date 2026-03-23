@@ -1,3 +1,5 @@
+import AVFoundation
+import AVKit
 import SwiftUI
 import UIKit
 
@@ -915,6 +917,162 @@ struct PetPalInlineFeedback: View {
     }
 }
 
+struct PetPalPlayableVideoView: View {
+    @StateObject private var controller: PetPalPlayableVideoController
+
+    init(url: URL) {
+        _controller = StateObject(wrappedValue: PetPalPlayableVideoController(url: url))
+    }
+
+    var body: some View {
+        ZStack {
+            if controller.isPlaying {
+                PetPalSystemVideoPlayer(player: controller.player)
+                    .background(Color.black)
+            } else {
+                Button {
+                    controller.startPlayback()
+                } label: {
+                    ZStack {
+                        thumbnailBackground
+
+                        LinearGradient(
+                            colors: [.clear, Color.black.opacity(0.16), Color.black.opacity(0.36)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+
+                        VStack(spacing: 10) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.white.opacity(0.92))
+                                    .frame(width: 64, height: 64)
+
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 24, weight: .black))
+                                    .foregroundStyle(PetPalTheme.caramel)
+                                    .offset(x: 2)
+                            }
+
+                            Text("点击播放")
+                                .font(.system(size: 12, weight: .black, design: .rounded))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.black.opacity(0.26))
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .contentShape(Rectangle())
+        .task {
+            await controller.loadThumbnailIfNeeded()
+        }
+        .onDisappear {
+            controller.stopPlayback()
+        }
+    }
+
+    @ViewBuilder
+    private var thumbnailBackground: some View {
+        if let thumbnail = controller.thumbnail {
+            Image(uiImage: thumbnail)
+                .resizable()
+                .scaledToFill()
+        } else {
+            ZStack {
+                LinearGradient(
+                    colors: [Color(hex: "E8DED0"), Color(hex: "D5E2DB"), Color(hex: "F5E6D8")],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+
+                Image(systemName: "video.fill")
+                    .font(.system(size: 30, weight: .black))
+                    .foregroundStyle(Color.white.opacity(0.9))
+                    .shadow(color: Color.black.opacity(0.12), radius: 8, y: 4)
+            }
+        }
+    }
+}
+
+@MainActor
+final class PetPalPlayableVideoController: ObservableObject {
+    let url: URL
+    let player: AVPlayer
+
+    @Published var thumbnail: UIImage?
+    @Published var isPlaying = false
+
+    private var hasLoadedThumbnail = false
+
+    init(url: URL) {
+        self.url = url
+        self.player = AVPlayer(url: url)
+    }
+
+    func loadThumbnailIfNeeded() async {
+        guard !hasLoadedThumbnail else { return }
+        hasLoadedThumbnail = true
+
+        let url = self.url
+        let image = await Task.detached(priority: .userInitiated) {
+            PetPalPlayableVideoController.generateThumbnail(for: url)
+        }.value
+
+        thumbnail = image
+    }
+
+    func startPlayback() {
+        isPlaying = true
+        player.seek(to: .zero)
+        player.play()
+    }
+
+    func stopPlayback() {
+        player.pause()
+        player.seek(to: .zero)
+        isPlaying = false
+    }
+
+    nonisolated private static func generateThumbnail(for url: URL) -> UIImage? {
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 1_600, height: 1_600)
+
+        do {
+            let cgImage = try generator.copyCGImage(at: .zero, actualTime: nil)
+            return UIImage(cgImage: cgImage)
+        } catch {
+            return nil
+        }
+    }
+}
+
+private struct PetPalSystemVideoPlayer: UIViewControllerRepresentable {
+    let player: AVPlayer
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.player = player
+        controller.showsPlaybackControls = true
+        controller.entersFullScreenWhenPlaybackBegins = false
+        controller.exitsFullScreenWhenPlaybackEnds = true
+        controller.videoGravity = .resizeAspectFill
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
+        if uiViewController.player !== player {
+            uiViewController.player = player
+        }
+    }
+}
+
 struct PetPalFieldLabel: View {
     let title: String
     var required: Bool = false
@@ -975,6 +1133,23 @@ struct PetPalSmallGhostButtonStyle: ButtonStyle {
             .frame(height: 42)
             .background(Color(hex: "FFF4E5").opacity(0.92))
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .opacity(configuration.isPressed ? 0.9 : 1)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.easeOut(duration: 0.18), value: configuration.isPressed)
+    }
+}
+
+struct PetPalIconGhostButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(PetPalTheme.ink)
+            .frame(width: 36, height: 36)
+            .background(Color(hex: "FFF4E5").opacity(0.94))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(PetPalTheme.line.opacity(0.9), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .opacity(configuration.isPressed ? 0.9 : 1)
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
             .animation(.easeOut(duration: 0.18), value: configuration.isPressed)

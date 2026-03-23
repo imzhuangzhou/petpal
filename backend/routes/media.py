@@ -124,6 +124,8 @@ def _serialize_debug_event(event: dict) -> dict:
         "description": event.get("description", ""),
         "timestamp": event.get("timestamp", ""),
         "duration_seconds": event.get("duration_seconds", 0),
+        "video_start_seconds": event.get("video_start_seconds"),
+        "video_end_seconds": event.get("video_end_seconds"),
         "frame_url": event.get("frame_path", ""),
     }
 
@@ -153,9 +155,14 @@ def _merge_analyzed_frames(analyzed_frames: list[dict]) -> list[dict]:
             else frame["video_seconds"] + frame["fallback_duration"]
         )
         duration_seconds = max(10.0, next_timestamp - frame["video_seconds"])
+        segment_start_seconds = frame["video_seconds"]
+        segment_end_seconds = segment_start_seconds + duration_seconds
 
         if merged and merged[-1]["event_type"] == frame["event_type"]:
-            merged[-1]["duration_seconds"] += duration_seconds
+            merged[-1]["video_end_seconds"] = segment_end_seconds
+            merged[-1]["duration_seconds"] = (
+                merged[-1]["video_end_seconds"] - merged[-1]["video_start_seconds"]
+            )
             merged[-1]["description"] = frame["description"]
             continue
 
@@ -165,6 +172,8 @@ def _merge_analyzed_frames(analyzed_frames: list[dict]) -> list[dict]:
                 "description": frame["description"],
                 "timestamp": frame["event_time"].isoformat(),
                 "duration_seconds": duration_seconds,
+                "video_start_seconds": segment_start_seconds,
+                "video_end_seconds": segment_end_seconds,
                 "frame_path": frame["frame_path"],
             }
         )
@@ -280,14 +289,26 @@ def _persist_analyzed_events(
 
     for event in analyzed_events:
         execute_db(
-            """INSERT INTO events (camera_id, pet_id, timestamp, event_type, duration_seconds, description, frame_path)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO events (
+                   camera_id,
+                   pet_id,
+                   timestamp,
+                   event_type,
+                   duration_seconds,
+                   video_start_seconds,
+                   video_end_seconds,
+                   description,
+                   frame_path
+               )
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 target_camera_id,
                 pet_id,
                 event["timestamp"],
                 event["event_type"],
                 event["duration_seconds"],
+                event.get("video_start_seconds"),
+                event.get("video_end_seconds"),
                 event["description"],
                 event["frame_path"],
             ),
@@ -482,7 +503,8 @@ def get_video_analysis_debug(camera_id: int):
     )
     events = query_db(
         """
-        SELECT id, pet_id, event_type, description, timestamp, duration_seconds, frame_path
+        SELECT id, pet_id, event_type, description, timestamp, duration_seconds,
+               video_start_seconds, video_end_seconds, frame_path
         FROM events
         WHERE camera_id = ?
         ORDER BY timestamp DESC

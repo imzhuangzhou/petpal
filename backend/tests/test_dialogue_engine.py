@@ -238,6 +238,30 @@ class DailyReportCardTests(unittest.TestCase):
         self.assertIn("Boss", payload["card"]["headline"])
 
 
+class MatchRelatedEventsTests(unittest.TestCase):
+    @patch("dialogue_engine.get_cached_event_context")
+    def test_match_related_events_returns_event_metadata_without_frame_url(self, mock_get_cached_event_context):
+        mock_get_cached_event_context.return_value = (
+            "",
+            {},
+            [
+                {
+                    "id": 3,
+                    "event_type": "playing",
+                    "description": "在客厅追球",
+                    "timestamp": "2026-03-23T10:00:00",
+                    "frame_path": "/frames/ball.jpg",
+                }
+            ],
+        )
+
+        related = dialogue_engine.match_related_events("刚刚是不是在客厅追球呀", pet_id=1)
+
+        self.assertEqual(len(related), 1)
+        self.assertEqual(related[0]["event_id"], 3)
+        self.assertEqual(related[0]["video_clip_url"], "")
+
+
 class SystemPromptTests(unittest.TestCase):
     @patch("dialogue_engine.get_cached_event_context")
     def test_build_system_prompt_supports_chill_style(self, mock_get_cached_event_context):

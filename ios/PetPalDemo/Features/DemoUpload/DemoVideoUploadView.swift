@@ -1,4 +1,5 @@
 import AVFoundation
+import AVKit
 import SwiftUI
 import UIKit
 
@@ -13,6 +14,10 @@ struct DemoVideoUploadView: View {
     @State private var radarSessionID = UUID()
     @State private var hasAttemptedCompletion = false
 
+    private var bundledVideo: MockPetSpeciesBundledVideo {
+        .forSpecies(appStore.session.petSpecies)
+    }
+
     var body: some View {
         PetPalShell {
             ScrollViewReader { scrollProxy in
@@ -20,17 +25,44 @@ struct DemoVideoUploadView: View {
                     ScrollView(showsIndicators: false) {
                         VStack(spacing: 16) {
                             PetPalPanelCard {
-                                PetPalSectionHeader(
-                                    eyebrow: "摄像头",
-                                    title: "搜索并绑定摄像头",
-                                    chipText: nil
-                                )
+                                HStack(alignment: .bottom, spacing: 12) {
+                                    PetPalSectionHeader(
+                                        eyebrow: "摄像头",
+                                        title: "搜索并绑定摄像头",
+                                        chipText: nil
+                                    )
+
+                                    if selectedCamera != nil {
+                                        Spacer(minLength: 8)
+
+                                        Button {
+                                            presentRadarScanner()
+                                        } label: {
+                                            Text("重新搜索")
+                                                .font(.system(size: 12, weight: .black, design: .rounded))
+                                                .foregroundStyle(PetPalTheme.caramel)
+                                                .padding(.horizontal, 14)
+                                                .frame(height: 34)
+                                                .background(Color(hex: "FFF0DC").opacity(0.95))
+                                                .overlay(
+                                                    Capsule()
+                                                        .stroke(Color(hex: "E6C8A8").opacity(0.88), lineWidth: 1)
+                                                )
+                                                .clipShape(Capsule())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("重新搜索摄像头")
+                                        .accessibilityHint("进入雷达扫描页，重新搜索附近的家庭摄像头")
+                                        .disabled(isUploading)
+                                    }
+                                }
 
                                 Button {
                                     presentRadarScanner()
                                 } label: {
                                     CameraBindingCard(
                                         camera: selectedCamera,
+                                        bundledVideo: bundledVideo,
                                         isConnecting: isConnecting,
                                         showsValidationHighlight: cameraInlineFeedbackMessage != nil
                                     )
@@ -49,10 +81,6 @@ struct DemoVideoUploadView: View {
                                         title: "连接状态",
                                         value: connectionStatusText
                                     )
-
-                                    Text(selectedCamera == nil ? "点按上方卡片开始搜索。" : "点按上方卡片可重新搜索或切换设备。")
-                                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                                        .foregroundStyle(PetPalTheme.inkSoft)
                                 }
 
                                 if let cameraInlineFeedbackMessage {
@@ -73,7 +101,7 @@ struct DemoVideoUploadView: View {
                     if isUploading {
                         PetPalLoadingOverlay(
                             title: "正在同步摄像头回放...",
-                            subtitle: "我们会自动生成一段联调视频，并把它和摄像头名称一起上传。"
+                            subtitle: "我们会把当前摄像头对应的回放视频和设备名称一起上传。"
                         )
                     }
                 }
@@ -228,19 +256,22 @@ struct DemoVideoUploadView: View {
         hasAttemptedCompletion = true
         errorMessage = nil
 
-        var generatedVideoURL: URL?
+        var preparedVideoURL: URL?
 
         defer {
             isUploading = false
 
-            if let generatedVideoURL {
-                try? FileManager.default.removeItem(at: generatedVideoURL)
+            if let preparedVideoURL {
+                try? FileManager.default.removeItem(at: preparedVideoURL)
             }
         }
 
         do {
-            let mockVideoURL = try await MockCameraVideoGenerator.generateVideo(cameraName: selectedCamera.name)
-            generatedVideoURL = mockVideoURL
+            let uploadVideoURL = try await MockCameraUploadVideoProvider.prepareUploadVideo(
+                for: selectedCamera,
+                species: appStore.session.petSpecies
+            )
+            preparedVideoURL = uploadVideoURL
 
             let response = try await appStore.apiClient.uploadDemoVideo(
                 DemoVideoUploadRequest(
@@ -248,7 +279,7 @@ struct DemoVideoUploadView: View {
                     petID: petID,
                     cameraName: selectedCamera.name,
                     cameraID: appStore.session.cameraId,
-                    videoFileURL: mockVideoURL
+                    videoFileURL: uploadVideoURL
                 )
             )
 
@@ -282,6 +313,7 @@ private enum DemoUploadCompletionBlocker {
 
 private struct CameraBindingCard: View {
     let camera: MockCameraDevice?
+    let bundledVideo: MockPetSpeciesBundledVideo
     let isConnecting: Bool
     let showsValidationHighlight: Bool
 
@@ -387,7 +419,7 @@ private struct CameraBindingCard: View {
                 CameraConnectingState(camera: camera)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                MockCameraFeedView(camera: camera)
+                CameraFeedPreview(camera: camera, bundledVideo: bundledVideo)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -472,6 +504,75 @@ private struct LoadingDots: View {
         .onAppear {
             isAnimating = true
         }
+    }
+}
+
+private struct CameraFeedPreview: View {
+    let camera: MockCameraDevice
+    let bundledVideo: MockPetSpeciesBundledVideo
+
+    var body: some View {
+        switch camera.videoSource {
+        case .bundledPetSpecies:
+            if let bundledURL = Bundle.main.url(forResource: bundledVideo.name, withExtension: bundledVideo.fileExtension) {
+                BundledCameraFeedView(camera: camera, videoURL: bundledURL)
+            } else {
+                MockCameraFeedView(camera: camera)
+            }
+        case let .bundledResource(name, fileExtension):
+            if let bundledURL = Bundle.main.url(forResource: name, withExtension: fileExtension) {
+                BundledCameraFeedView(camera: camera, videoURL: bundledURL)
+            } else {
+                MockCameraFeedView(camera: camera)
+            }
+        case .generatedMock:
+            MockCameraFeedView(camera: camera)
+        }
+    }
+}
+
+private struct BundledCameraFeedView: View {
+    let camera: MockCameraDevice
+    let videoURL: URL
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            LoopingMutedVideoView(url: videoURL)
+
+            LinearGradient(
+                colors: [Color.black.opacity(0.16), Color.clear, Color.black.opacity(0.12)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            HStack(spacing: 8) {
+                PetPalCapsuleLabel(text: "LIVE", style: .hero)
+
+                Text("回放预览")
+                    .font(.system(size: 12, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .frame(height: 30)
+                    .background(Color.black.opacity(0.24))
+                    .clipShape(Capsule())
+            }
+            .padding(14)
+
+            Text(camera.name)
+                .font(.system(size: 13, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .frame(height: 32)
+                .background(Color.black.opacity(0.2))
+                .clipShape(Capsule())
+                .padding(14)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.white.opacity(0.22), lineWidth: 1)
+        )
     }
 }
 
@@ -577,6 +678,48 @@ private struct MockCameraFeedView: View {
     private func timeString(for phase: Double) -> String {
         let minute = Int(phase * 59)
         return String(format: "18:%02d", minute)
+    }
+}
+
+private struct LoopingMutedVideoView: View {
+    @StateObject private var controller: LoopingMutedVideoController
+
+    init(url: URL) {
+        _controller = StateObject(wrappedValue: LoopingMutedVideoController(url: url))
+    }
+
+    var body: some View {
+        VideoPlayer(player: controller.player)
+            .disabled(true)
+            .allowsHitTesting(false)
+            .onAppear {
+                controller.play()
+            }
+            .onDisappear {
+                controller.pause()
+            }
+    }
+}
+
+private final class LoopingMutedVideoController: ObservableObject {
+    let player: AVQueuePlayer
+
+    private var looper: AVPlayerLooper?
+
+    init(url: URL) {
+        player = AVQueuePlayer()
+        player.isMuted = true
+        player.actionAtItemEnd = .none
+        looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+    }
+
+    func play() {
+        player.play()
+    }
+
+    func pause() {
+        player.pause()
+        player.seek(to: .zero)
     }
 }
 
@@ -814,6 +957,7 @@ private struct MockCameraDevice: Identifiable, Equatable {
     let glowColor: Color
     let iconColor: Color
     let position: RadarPosition
+    let videoSource: MockCameraVideoSource
 
     static let defaults: [MockCameraDevice] = [
         MockCameraDevice(
@@ -823,7 +967,8 @@ private struct MockCameraDevice: Identifiable, Equatable {
             coreColor: Color(hex: "FFD4B3"),
             glowColor: Color(hex: "F4B180"),
             iconColor: Color(hex: "7B5343"),
-            position: RadarPosition(x: 0.34, y: 0.32)
+            position: RadarPosition(x: 0.34, y: 0.32),
+            videoSource: .bundledPetSpecies
         ),
         MockCameraDevice(
             id: "ezviz-bedroom",
@@ -832,9 +977,81 @@ private struct MockCameraDevice: Identifiable, Equatable {
             coreColor: Color(hex: "FFE2CE"),
             glowColor: Color(hex: "E7B798"),
             iconColor: Color(hex: "7B5343"),
-            position: RadarPosition(x: 0.7, y: 0.64)
+            position: RadarPosition(x: 0.7, y: 0.64),
+            videoSource: .bundledPetSpecies
         )
     ]
+}
+
+private enum MockCameraVideoSource: Equatable {
+    case bundledPetSpecies
+    case generatedMock
+    case bundledResource(name: String, fileExtension: String)
+}
+
+private struct MockPetSpeciesBundledVideo: Equatable {
+    let name: String
+    let fileExtension: String
+
+    static func forSpecies(_ species: String) -> MockPetSpeciesBundledVideo {
+        species == "dog"
+            ? MockPetSpeciesBundledVideo(name: "petpal-dog-demo", fileExtension: "mp4")
+            : MockPetSpeciesBundledVideo(name: "ezviz-living-room-demo", fileExtension: "mp4")
+    }
+}
+
+private enum MockCameraUploadVideoProvider {
+    private enum VideoPreparationError: LocalizedError {
+        case bundledResourceMissing(name: String, fileExtension: String)
+        case bundledVideoCopyFailed
+
+        var errorDescription: String? {
+            switch self {
+            case let .bundledResourceMissing(name, fileExtension):
+                return "没有找到内置视频资源 \(name).\(fileExtension)，请检查工程资源配置。"
+            case .bundledVideoCopyFailed:
+                return "无法准备内置视频文件，请稍后再试。"
+            }
+        }
+    }
+
+    static func prepareUploadVideo(for camera: MockCameraDevice, species: String) async throws -> URL {
+        switch camera.videoSource {
+        case .bundledPetSpecies:
+            let bundledVideo = MockPetSpeciesBundledVideo.forSpecies(species)
+            return try copyBundledVideoToTemporaryDirectory(
+                name: bundledVideo.name,
+                fileExtension: bundledVideo.fileExtension
+            )
+        case .generatedMock:
+            return try await MockCameraVideoGenerator.generateVideo(cameraName: camera.name)
+        case let .bundledResource(name, fileExtension):
+            return try copyBundledVideoToTemporaryDirectory(name: name, fileExtension: fileExtension)
+        }
+    }
+
+    private static func copyBundledVideoToTemporaryDirectory(
+        name: String,
+        fileExtension: String
+    ) throws -> URL {
+        guard let bundledURL = Bundle.main.url(forResource: name, withExtension: fileExtension) else {
+            throw VideoPreparationError.bundledResourceMissing(name: name, fileExtension: fileExtension)
+        }
+
+        let tempDirectoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("petpal-bundled-video-\(UUID().uuidString)", isDirectory: true)
+        let tempURL = tempDirectoryURL
+            .appendingPathComponent(name)
+            .appendingPathExtension(fileExtension)
+
+        do {
+            try FileManager.default.createDirectory(at: tempDirectoryURL, withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: bundledURL, to: tempURL)
+            return tempURL
+        } catch {
+            throw VideoPreparationError.bundledVideoCopyFailed
+        }
+    }
 }
 
 private enum MockCameraVideoGenerator {

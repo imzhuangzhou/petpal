@@ -32,7 +32,7 @@
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>需要语音识别权限，将您的语音转为文字与宠物聊天。</string>
 	<key>API_BASE_URL</key>
-	<string>http://172.20.10.9:8000</string>
+	<string>http://127.0.0.1:8000</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 </dict>

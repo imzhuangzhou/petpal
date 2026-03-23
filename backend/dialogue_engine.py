@@ -405,15 +405,12 @@ def match_related_events(reply_text: str, pet_id: int, top_n: int = 3) -> list[d
 
     results = []
     for _, e in scored[:top_n]:
-        frame_path = e.get("frame_path", "")
-        # Serve frame as /frames/... (static mount in main.py)
-        frame_url = frame_path if frame_path.startswith("/frames/") else ""
         results.append({
             "event_id": e.get("id"),
             "event_type": e.get("event_type", ""),
             "description": e.get("description", ""),
             "timestamp": e.get("timestamp", ""),
-            "video_clip_url": frame_url,
+            "video_clip_url": "",
         })
     return results
 

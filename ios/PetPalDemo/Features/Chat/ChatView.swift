@@ -30,6 +30,7 @@ struct ChatView: View {
     @State private var recordingTimer: Timer?
     @State private var hasLoadedInitialMessages = false
     @State private var expandedRelatedEventKey: RelatedEventExpansionKey?
+    @State private var relatedEventClipStates: [Int: RelatedEventClipState] = [:]
 
     private let mockStatusEvents: [PetStatusEvent] = [
         .init(id: 1, minutesAgo: 5, eventText: "跑酷中"),
@@ -782,6 +783,7 @@ struct ChatView: View {
         let eventKey = RelatedEventExpansionKey(messageID: messageID, eventID: event.id)
         let isExpanded = expandedRelatedEventKey == eventKey
         let videoURL = resolvedVideoURL(for: event)
+        let clipState = relatedEventClipStates[event.id] ?? .idle
 
         return VStack(alignment: .leading, spacing: isExpanded ? 10 : 0) {
             HStack(alignment: .center, spacing: 10) {
@@ -805,42 +807,45 @@ struct ChatView: View {
 
                 Spacer(minLength: 8)
 
-                if videoURL != nil {
-                    Button {
-                        toggleRelatedEventExpansion(for: eventKey)
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: isExpanded ? "chevron.up.circle.fill" : "play.rectangle.fill")
-                                .font(.system(size: 11, weight: .black))
+                Button {
+                    toggleRelatedEventExpansion(for: eventKey, eventID: event.id)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: isExpanded ? "chevron.up.circle.fill" : "play.rectangle.fill")
+                            .font(.system(size: 11, weight: .black))
 
-                            Text(isExpanded ? "收起视频" : "查看视频")
-                                .font(.system(size: 11, weight: .black, design: .rounded))
-                        }
-                        .foregroundStyle(isExpanded ? Color(hex: "7D5231") : Color(hex: "8F6543"))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(isExpanded ? Color(hex: "F7E5D2") : Color(hex: "FFF7EE"))
-                        .clipShape(Capsule())
-                        .overlay(
-                            Capsule()
-                                .stroke(Color(hex: "E2C7AD").opacity(isExpanded ? 0.9 : 0.65), lineWidth: 1)
-                        )
+                        Text(relatedEventButtonTitle(isExpanded: isExpanded, clipState: clipState))
+                            .font(.system(size: 11, weight: .black, design: .rounded))
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(isExpanded ? "收起事件视频" : "查看事件视频")
+                    .foregroundStyle(isExpanded ? Color(hex: "7D5231") : Color(hex: "8F6543"))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(isExpanded ? Color(hex: "F7E5D2") : Color(hex: "FFF7EE"))
+                    .clipShape(Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(Color(hex: "E2C7AD").opacity(isExpanded ? 0.9 : 0.65), lineWidth: 1)
+                    )
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isExpanded ? "收起事件视频" : "查看事件视频")
             }
 
-            if isExpanded, let videoURL {
-                InlineVideoMessageView(url: videoURL)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 184)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(Color(hex: "E5D2BF").opacity(0.72), lineWidth: 1)
-                    )
-                    .transition(.move(edge: .top).combined(with: .opacity))
+            if isExpanded {
+                if let videoURL {
+                    InlineVideoMessageView(url: videoURL)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 184)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(Color(hex: "E5D2BF").opacity(0.72), lineWidth: 1)
+                        )
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                } else {
+                    relatedEventClipPlaceholder(for: clipState, eventID: event.id)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
         }
         .padding(.horizontal, isExpanded ? 14 : 12)
@@ -879,25 +884,130 @@ struct ChatView: View {
         return isoString
     }
 
-    private func toggleRelatedEventExpansion(for eventKey: RelatedEventExpansionKey) {
+    private func toggleRelatedEventExpansion(for eventKey: RelatedEventExpansionKey, eventID: Int) {
+        let shouldExpand = expandedRelatedEventKey != eventKey
         withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
-            expandedRelatedEventKey = expandedRelatedEventKey == eventKey ? nil : eventKey
+            expandedRelatedEventKey = shouldExpand ? eventKey : nil
+        }
+
+        guard shouldExpand else {
+            return
+        }
+
+        Task {
+            await loadRelatedEventClipIfNeeded(eventID: eventID)
         }
     }
 
     private func resolvedVideoURL(for event: RelatedEvent) -> URL? {
+        if case .loaded(let loadedURL) = relatedEventClipStates[event.id] {
+            return loadedURL
+        }
+
         let clipPath = event.videoClipUrl.trimmingCharacters(in: .whitespacesAndNewlines)
         if let directClipURL = appStore.apiClient.resolvedURL(for: clipPath),
            isPlayableVideoURL(directClipURL) {
             return directClipURL
         }
 
-        return cameraPreviewURL
+        return nil
     }
 
     private func isPlayableVideoURL(_ url: URL) -> Bool {
         let videoExtensions = Set(["mp4", "mov", "m4v"])
         return videoExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    private func relatedEventButtonTitle(isExpanded: Bool, clipState: RelatedEventClipState) -> String {
+        if isExpanded {
+            return "收起视频"
+        }
+
+        switch clipState {
+        case .failed(_):
+            return "重试片段"
+        case .loading:
+            return "生成中"
+        case .loaded(_), .idle:
+            return "查看视频"
+        }
+    }
+
+    @ViewBuilder
+    private func relatedEventClipPlaceholder(for clipState: RelatedEventClipState, eventID: Int) -> some View {
+        switch clipState {
+        case .loading, .idle:
+            HStack(spacing: 10) {
+                ProgressView()
+                    .tint(PetPalTheme.caramel)
+
+                Text("正在生成事件片段...")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(PetPalTheme.inkSoft)
+            }
+            .frame(maxWidth: .infinity, minHeight: 82)
+            .padding(.horizontal, 14)
+            .background(Color(hex: "FFF8F0"))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color(hex: "E5D2BF").opacity(0.72), lineWidth: 1)
+            )
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 10) {
+                Text(message)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(PetPalTheme.danger)
+                    .lineSpacing(3)
+
+                Button("重新生成片段") {
+                    Task {
+                        await loadRelatedEventClipIfNeeded(eventID: eventID, forceReload: true)
+                    }
+                }
+                .font(.system(size: 12, weight: .black, design: .rounded))
+                .foregroundStyle(Color(hex: "8F6543"))
+                .buttonStyle(.plain)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .background(Color(hex: "FFF8F0"))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color(hex: "E5D2BF").opacity(0.72), lineWidth: 1)
+            )
+        case .loaded(_):
+            EmptyView()
+        }
+    }
+
+    @MainActor
+    private func loadRelatedEventClipIfNeeded(eventID: Int, forceReload: Bool = false) async {
+        if !forceReload {
+            switch relatedEventClipStates[eventID] ?? .idle {
+            case .loading, .loaded(_):
+                return
+            case .idle, .failed(_):
+                break
+            }
+        }
+
+        relatedEventClipStates[eventID] = .loading
+
+        do {
+            let response = try await appStore.apiClient.fetchEventClip(eventID: eventID)
+            guard let clipURL = appStore.apiClient.resolvedURL(for: response.videoClipURL),
+                  isPlayableVideoURL(clipURL) else {
+                relatedEventClipStates[eventID] = .failed("生成了片段，但地址不可播放。")
+                return
+            }
+
+            relatedEventClipStates[eventID] = .loaded(clipURL)
+        } catch {
+            let message = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            relatedEventClipStates[eventID] = .failed(message.ifEmpty("事件片段生成失败，请稍后重试。"))
+        }
     }
 
     // MARK: - Subview builders
@@ -1782,8 +1892,7 @@ private struct CameraContextPreview: View {
     var body: some View {
         ZStack {
             if let previewURL {
-                VideoPlayer(player: AVPlayer(url: previewURL))
-                    .allowsHitTesting(false)
+                PetPalPlayableVideoView(url: previewURL)
                     .overlay(alignment: .bottomTrailing) {
                         Label("重选视频", systemImage: "arrow.triangle.2.circlepath")
                             .font(.system(size: 11, weight: .black, design: .rounded))
@@ -2012,19 +2121,11 @@ private final class PetPalLocalNotificationManager {
 }
 
 private struct InlineVideoMessageView: View {
-    @State private var player: AVPlayer
-
-    init(url: URL) {
-        _player = State(initialValue: AVPlayer(url: url))
-    }
+    let url: URL
 
     var body: some View {
-        VideoPlayer(player: player)
+        PetPalPlayableVideoView(url: url)
             .background(Color.black.opacity(0.08))
-            .onDisappear {
-                player.pause()
-                player.seek(to: .zero)
-            }
     }
 }
 
@@ -2555,6 +2656,13 @@ private func formattedCallDurationForAccessibility(_ elapsedSeconds: Int) -> Str
 private struct RelatedEventExpansionKey: Hashable {
     let messageID: String
     let eventID: Int
+}
+
+private enum RelatedEventClipState: Equatable {
+    case idle
+    case loading
+    case loaded(URL)
+    case failed(String)
 }
 
 private struct RecordingPulseView: View {

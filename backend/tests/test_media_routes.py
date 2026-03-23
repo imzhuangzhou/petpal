@@ -8,6 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 fake_video_processor = types.ModuleType("video_processor")
 fake_video_processor.extract_uniform_frames = lambda *args, **kwargs: []
+fake_video_processor.clip_video_segment = lambda *args, **kwargs: "/media/clips/test.mp4"
+fake_video_processor.get_video_duration = lambda *args, **kwargs: 60.0
 sys.modules.setdefault("video_processor", fake_video_processor)
 
 fake_vlm_service = types.ModuleType("vlm_service")
@@ -49,6 +51,8 @@ class UploadDemoVideoRouteTests(unittest.TestCase):
                     "description": "在地上追球",
                     "timestamp": "2026-03-23T10:00:00",
                     "duration_seconds": 30,
+                    "video_start_seconds": 5.0,
+                    "video_end_seconds": 35.0,
                     "frame_path": "/frames/a.jpg",
                 }
             ],
@@ -138,6 +142,8 @@ class VideoAnalysisDebugRouteTests(unittest.TestCase):
                     "description": "趴着",
                     "timestamp": "2026-03-23T12:00:00",
                     "duration_seconds": 20,
+                    "video_start_seconds": 3.0,
+                    "video_end_seconds": 23.0,
                     "frame_path": "/frames/1.jpg",
                 }
             ],
@@ -153,6 +159,8 @@ class VideoAnalysisDebugRouteTests(unittest.TestCase):
         self.assertEqual(len(response["frames"]), 1)
         self.assertEqual(len(response["events"]), 1)
         self.assertEqual(response["events"][0]["frame_url"], "/frames/1.jpg")
+        self.assertEqual(response["events"][0]["video_start_seconds"], 3.0)
+        self.assertEqual(response["events"][0]["video_end_seconds"], 23.0)
         self.assertEqual(mock_query_db.call_count, 3)
 
     @patch(
@@ -178,6 +186,46 @@ class VideoAnalysisDebugRouteTests(unittest.TestCase):
         self.assertEqual(response["events"], [])
         self.assertEqual(response["demo_video_url"], "/media/videos/demo.mp4")
         self.assertEqual(mock_query_db.call_count, 3)
+
+
+class MergeAnalyzedFramesTests(unittest.TestCase):
+    def test_merge_analyzed_frames_keeps_video_ranges_for_combined_events(self):
+        analyzed_frames = [
+            {
+                "event_type": "playing",
+                "description": "追球",
+                "event_time": media_routes.datetime.fromisoformat("2026-03-23T10:00:00"),
+                "frame_path": "/frames/1.jpg",
+                "video_seconds": 5.0,
+                "fallback_duration": 10.0,
+            },
+            {
+                "event_type": "playing",
+                "description": "继续追球",
+                "event_time": media_routes.datetime.fromisoformat("2026-03-23T10:00:10"),
+                "frame_path": "/frames/2.jpg",
+                "video_seconds": 15.0,
+                "fallback_duration": 10.0,
+            },
+            {
+                "event_type": "resting",
+                "description": "停下来休息",
+                "event_time": media_routes.datetime.fromisoformat("2026-03-23T10:00:25"),
+                "frame_path": "/frames/3.jpg",
+                "video_seconds": 25.0,
+                "fallback_duration": 10.0,
+            },
+        ]
+
+        merged = media_routes._merge_analyzed_frames(analyzed_frames)
+
+        self.assertEqual(len(merged), 2)
+        self.assertEqual(merged[0]["event_type"], "playing")
+        self.assertEqual(merged[0]["video_start_seconds"], 5.0)
+        self.assertEqual(merged[0]["video_end_seconds"], 25.0)
+        self.assertEqual(merged[0]["duration_seconds"], 20.0)
+        self.assertEqual(merged[1]["video_start_seconds"], 25.0)
+        self.assertEqual(merged[1]["video_end_seconds"], 35.0)
 
 
 if __name__ == "__main__":

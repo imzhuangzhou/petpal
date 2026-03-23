@@ -25,6 +25,7 @@ struct SettingsView: View {
     @State private var selectedCatDefaultAvatarID = "cat_american_shorthair"
     @State private var selectedDogDefaultAvatarID = "dog_beagle"
     @State private var selectedReferencePhotoItem: PhotosPickerItem?
+    @State private var isShowingReferencePhotoPicker = false
     @State private var referencePhotoLocalURL: URL?
     @State private var referencePhotoRemotePath = ""
     @State private var generatedAvatarRemotePath = ""
@@ -94,6 +95,12 @@ struct SettingsView: View {
                 await importReferencePhoto()
             }
         }
+        .photosPicker(
+            isPresented: $isShowingReferencePhotoPicker,
+            selection: $selectedReferencePhotoItem,
+            matching: .images,
+            photoLibrary: .shared()
+        )
         .onChange(of: species) { oldValue, newValue in
             handleSpeciesChange(from: oldValue, to: newValue)
         }
@@ -285,7 +292,7 @@ struct SettingsView: View {
                 }
 
                 if let previewURL = selectedPreviewURL {
-                    VideoPlayer(player: AVPlayer(url: previewURL))
+                    PetPalPlayableVideoView(url: previewURL)
                         .frame(height: 220)
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
@@ -428,9 +435,9 @@ struct SettingsView: View {
         case .idle:
             return referencePhotoRemotePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? "当前是照片生成模式，请先选择一张新照片。"
-                : "请重新生成头像后再保存。"
+                : "请通过右上角菜单重新选择照片，或移除当前头像。"
         case .failed:
-            return "头像生成失败了，换张照片或再试一次后才能保存。"
+            return "头像生成失败了，换张照片后才能保存。"
         }
     }
 
@@ -490,20 +497,20 @@ struct SettingsView: View {
             } else {
                 PetSetupArtworkPreview(
                     remoteImageURL: generatedAvatarResolvedURL ?? referencePhotoResolvedURL,
-                    fallbackAsset: selectedSpeciesOption.artAsset
+                    fallbackAsset: selectedSpeciesOption.artAsset,
+                    onReplacePhoto: presentReferencePhotoPicker,
+                    onRemoveAvatar: removeCurrentAvatar
                 )
-
-                avatarPhotoActionRow(showRetry: referencePhotoLocalURL != nil)
             }
         case .generating:
             PetSetupAvatarLoadingCard()
         case .generated:
             PetSetupArtworkPreview(
                 remoteImageURL: generatedAvatarResolvedURL,
-                fallbackAsset: selectedSpeciesOption.artAsset
+                fallbackAsset: selectedSpeciesOption.artAsset,
+                onReplacePhoto: presentReferencePhotoPicker,
+                onRemoveAvatar: removeCurrentAvatar
             )
-
-            avatarPhotoActionRow(showRetry: referencePhotoLocalURL != nil)
         case .failed:
             PetSetupAvatarPlaceholder(
                 title: "这次没有成功生成卡通形象",
@@ -511,7 +518,7 @@ struct SettingsView: View {
                 accentAsset: .avatarPalette
             )
 
-            avatarPhotoActionRow(showRetry: referencePhotoLocalURL != nil)
+            avatarReplacePhotoButton(title: "重新选择照片")
         }
 
         if avatarGenerationState != .generating,
@@ -620,27 +627,27 @@ struct SettingsView: View {
         }
     }
 
-    @ViewBuilder
-    private func avatarPhotoActionRow(showRetry: Bool) -> some View {
-        HStack(spacing: 10) {
-            if showRetry {
-                Button("重新生成") {
-                    Task {
-                        await retryAvatarGeneration()
-                    }
-                }
-                .buttonStyle(PetPalSecondaryButtonStyle())
-            }
-
-            PhotosPicker(
-                selection: $selectedReferencePhotoItem,
-                matching: .images,
-                photoLibrary: .shared()
-            ) {
-                Text("更换照片")
-            }
-            .buttonStyle(PetPalSecondaryButtonStyle())
+    private func avatarReplacePhotoButton(title: String) -> some View {
+        Button(title) {
+            presentReferencePhotoPicker()
         }
+        .buttonStyle(PetPalSecondaryButtonStyle())
+    }
+
+    private func presentReferencePhotoPicker() {
+        petErrorMessage = nil
+        isShowingReferencePhotoPicker = true
+    }
+
+    private func removeCurrentAvatar() {
+        petErrorMessage = nil
+        avatarInputMode = .photoGenerated
+        selectedReferencePhotoItem = nil
+        cleanupReferencePhotoFile()
+        referencePhotoRemotePath = ""
+        generatedAvatarRemotePath = ""
+        avatarGenerationState = .idle
+        avatarMessage = "已移除当前头像，请重新选择照片。"
     }
 
     private func beginPetEditing() {
@@ -688,7 +695,7 @@ struct SettingsView: View {
         )
         avatarMessage = usesDefaultAvatar ? nil : (
             session.petAvatarURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? "选择一张新照片后，就能重新生成专属头像。"
+                ? "选择一张新照片后，就能生成专属头像。"
                 : "当前头像已同步，重新选照片后会覆盖成新的形象。"
         )
         petErrorMessage = nil
@@ -831,16 +838,6 @@ struct SettingsView: View {
         }
     }
 
-    private func retryAvatarGeneration() async {
-        guard let referencePhotoLocalURL else {
-            avatarGenerationState = .failed
-            avatarMessage = "找不到刚才选择的本地照片，请重新上传一张。"
-            return
-        }
-
-        await generateAvatar(from: referencePhotoLocalURL)
-    }
-
     private func generateAvatar(from localURL: URL) async {
         avatarGenerationState = .generating
         avatarMessage = "正在生成头像..."
@@ -929,8 +926,7 @@ private struct VideoAnalysisDebugView: View {
     @State private var errorMessage: String?
 
     private let frameColumns = [
-        GridItem(.flexible(), spacing: 10),
-        GridItem(.flexible(), spacing: 10),
+        GridItem(.adaptive(minimum: 196, maximum: 240), spacing: 12, alignment: .top)
     ]
 
     var body: some View {
@@ -988,7 +984,7 @@ private struct VideoAnalysisDebugView: View {
             )
 
             if let videoURL = resolvedVideoURL {
-                VideoPlayer(player: AVPlayer(url: videoURL))
+                PetPalPlayableVideoView(url: videoURL)
                     .frame(height: 220)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             } else {
@@ -1063,7 +1059,7 @@ private struct VideoAnalysisDebugView: View {
             )
 
             if let debugData, !debugData.frames.isEmpty {
-                LazyVGrid(columns: frameColumns, spacing: 10) {
+                LazyVGrid(columns: frameColumns, alignment: .leading, spacing: 12) {
                     ForEach(debugData.frames) { frame in
                         DebugFrameCard(frame: frame)
                     }
@@ -1210,38 +1206,50 @@ private struct DebugFrameCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            AsyncImage(url: resolvedFrameURL) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                default:
-                    ZStack {
-                        Color(hex: "FFF3E5")
-                        Image(systemName: "photo")
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(PetPalTheme.inkSoft)
+            ZStack {
+                AsyncImage(url: resolvedFrameURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    default:
+                        ZStack {
+                            Color(hex: "FFF3E5")
+
+                            Image(systemName: "photo")
+                                .font(.system(size: 22, weight: .bold))
+                                .foregroundStyle(PetPalTheme.inkSoft)
+                        }
                     }
                 }
             }
-            .frame(height: 132)
+            .frame(maxWidth: .infinity)
+            .aspectRatio(4 / 3, contentMode: .fit)
+            .clipped()
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
-            Text("#\(frame.sequence)  \(frame.videoTimeText)")
-                .font(.system(size: 12, weight: .black, design: .rounded))
-                .foregroundStyle(PetPalTheme.caramel)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("#\(frame.sequence)  \(frame.videoTimeText)")
+                    .font(.system(size: 12, weight: .black, design: .rounded))
+                    .foregroundStyle(PetPalTheme.caramel)
 
-            Text(frame.eventType.ifEmpty("other"))
-                .font(.system(size: 13, weight: .black, design: .rounded))
-                .foregroundStyle(PetPalTheme.ink)
+                Text(frame.eventType.ifEmpty("other"))
+                    .font(.system(size: 13, weight: .black, design: .rounded))
+                    .foregroundStyle(PetPalTheme.ink)
+                    .lineLimit(1)
 
-            Text(frame.description)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(PetPalTheme.inkSoft)
-                .lineLimit(2)
+                Text(frame.description.ifEmpty("暂无描述"))
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(PetPalTheme.inkSoft)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 76, alignment: .topLeading)
         }
         .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(hex: "FFF8EE").opacity(0.95))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -1300,6 +1308,12 @@ private struct DebugEventCard: View {
                 Text("持续 \(Int(event.durationSeconds)) 秒")
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                     .foregroundStyle(PetPalTheme.caramel)
+
+                if let clipRangeText {
+                    Text("片段 \(clipRangeText)")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(PetPalTheme.inkSoft)
+                }
             }
 
             Spacer(minLength: 0)
@@ -1315,6 +1329,21 @@ private struct DebugEventCard: View {
 
     private var resolvedFrameURL: URL? {
         appStore.apiClient.resolvedURL(for: event.frameURL)
+    }
+
+    private var clipRangeText: String? {
+        guard let start = event.videoStartSeconds, let end = event.videoEndSeconds else {
+            return nil
+        }
+
+        return "\(formatVideoTime(start)) - \(formatVideoTime(end))"
+    }
+
+    private func formatVideoTime(_ seconds: Double) -> String {
+        let totalSeconds = max(Int(seconds.rounded(.down)), 0)
+        let minutes = totalSeconds / 60
+        let remainingSeconds = totalSeconds % 60
+        return String(format: "%02d:%02d", minutes, remainingSeconds)
     }
 }
 

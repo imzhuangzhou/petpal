@@ -66,6 +66,8 @@ def init_db():
             timestamp TIMESTAMP NOT NULL,
             event_type TEXT NOT NULL,
             duration_seconds REAL DEFAULT 0,
+            video_start_seconds REAL,
+            video_end_seconds REAL,
             description TEXT DEFAULT '',
             frame_path TEXT DEFAULT '',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -116,6 +118,8 @@ def init_db():
     ensure_column(cursor, "pets", "owner_alias", "TEXT DEFAULT ''")
     ensure_column(cursor, "cameras", "demo_video_path", "TEXT DEFAULT ''")
     ensure_column(cursor, "cameras", "demo_video_name", "TEXT DEFAULT ''")
+    ensure_column(cursor, "events", "video_start_seconds", "REAL")
+    ensure_column(cursor, "events", "video_end_seconds", "REAL")
     ensure_column(cursor, "chat_history", "message_type", "TEXT DEFAULT 'text'")
     ensure_column(cursor, "chat_history", "media_kind", "TEXT DEFAULT ''")
     ensure_column(cursor, "chat_history", "media_url", "TEXT DEFAULT ''")
@@ -130,6 +134,7 @@ _VALID_TABLES = {"users", "pets", "cameras", "events", "chat_history", "video_an
 _VALID_COLUMN_PATTERNS = {
     "pets": {"voice_type", "voice_key", "voice_label", "voice_sample_path", "owner_alias"},
     "cameras": {"demo_video_path", "demo_video_name"},
+    "events": {"video_start_seconds", "video_end_seconds"},
     "chat_history": {"message_type", "media_kind", "media_url", "trigger_source"},
 }
 

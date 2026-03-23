@@ -146,7 +146,7 @@ def detect_pet_vocalization_clip(video_path: str, species: str) -> dict:
         return {"matched": False, "reason": "没有发现明显叫声"}
 
     try:
-        video_duration = _get_video_duration(video_path)
+        video_duration = get_video_duration(video_path)
     except RuntimeError:
         return {"matched": False, "reason": "无法读取视频时长"}
     best_match = None
@@ -181,7 +181,7 @@ def detect_pet_vocalization_clip(video_path: str, species: str) -> dict:
     if clip_end <= clip_start:
         return {"matched": False, "reason": "裁剪片段长度无效"}
 
-    clip_url = _clip_video_segment(video_path, clip_start, clip_end)
+    clip_url = clip_video_segment(video_path, clip_start, clip_end)
     return {
         "matched": True,
         "clip_url": clip_url,
@@ -301,7 +301,7 @@ def _extract_candidate_frames(video_path: str, center_seconds: float, duration_s
     return frame_paths
 
 
-def _clip_video_segment(video_path: str, start_seconds: float, end_seconds: float) -> str:
+def clip_video_segment(video_path: str, start_seconds: float, end_seconds: float) -> str:
     ffmpeg_executable = _get_ffmpeg_executable()
     duration_seconds = max(end_seconds - start_seconds, 0.1)
     clip_name = f"{uuid.uuid4().hex}.mp4"
@@ -335,7 +335,7 @@ def _clip_video_segment(video_path: str, start_seconds: float, end_seconds: floa
     return f"/media/clips/{clip_name}"
 
 
-def _get_video_duration(video_path: str) -> float:
+def get_video_duration(video_path: str) -> float:
     capture = cv2.VideoCapture(video_path)
     if not capture.isOpened():
         raise RuntimeError("无法读取视频时长")
