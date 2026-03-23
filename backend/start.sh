@@ -18,10 +18,12 @@ fi
 # shellcheck disable=SC1091
 source ".venv/bin/activate"
 
-if ! python -c "import fastapi, uvicorn" >/dev/null 2>&1; then
+REQUIREMENTS_STAMP=".venv/.requirements-installed"
+if [ ! -f "$REQUIREMENTS_STAMP" ] || [ "requirements.txt" -nt "$REQUIREMENTS_STAMP" ]; then
   echo "Installing backend dependencies ..."
   python -m pip install -U pip
   python -m pip install -r requirements.txt
+  touch "$REQUIREMENTS_STAMP"
 fi
 
 HOST="${HOST:-0.0.0.0}"

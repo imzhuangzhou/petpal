@@ -52,6 +52,25 @@ class VocalizationCandidateTests(unittest.TestCase):
         self.assertAlmostEqual(candidates[1]["center_seconds"], 0.75, places=2)
 
 
+class FfmpegResolutionTests(unittest.TestCase):
+    @patch("video_processor.shutil.which", side_effect=["/usr/local/bin/ffmpeg"])
+    def test_get_ffmpeg_executable_uses_system_ffmpeg_when_available(self, mock_which):
+        executable = video_processor._get_ffmpeg_executable()
+
+        self.assertEqual(executable, "/usr/local/bin/ffmpeg")
+        mock_which.assert_called_once_with("ffmpeg")
+
+    @patch("video_processor.importlib.import_module", side_effect=ImportError)
+    @patch("video_processor.shutil.which", return_value=None)
+    def test_get_ffmpeg_executable_raises_clear_error_when_unavailable(
+        self,
+        _mock_which,
+        _mock_import_module,
+    ):
+        with self.assertRaisesRegex(RuntimeError, "未找到可用的 ffmpeg"):
+            video_processor._get_ffmpeg_executable()
+
+
 class ProactiveMessageTests(unittest.TestCase):
     @patch("proactive_chat.os.path.exists", return_value=True)
     @patch("proactive_chat.execute_db", return_value=11)

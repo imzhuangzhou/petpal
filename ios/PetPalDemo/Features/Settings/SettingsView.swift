@@ -933,13 +933,9 @@ private struct VideoAnalysisDebugView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
 
-    private var frameColumns: [GridItem] {
-        if horizontalSizeClass == .compact {
-            return [GridItem(.flexible(), spacing: 12, alignment: .top)]
-        }
-
-        return [GridItem(.adaptive(minimum: 196, maximum: 280), spacing: 12, alignment: .top)]
-    }
+    private let frameColumns = [
+        GridItem(.adaptive(minimum: 196, maximum: 280), spacing: 12, alignment: .top)
+    ]
 
     var body: some View {
         PetPalShell {
@@ -1074,9 +1070,17 @@ private struct VideoAnalysisDebugView: View {
             )
 
             if let debugData, !debugData.frames.isEmpty {
-                LazyVGrid(columns: frameColumns, alignment: .leading, spacing: 12) {
-                    ForEach(debugData.frames) { frame in
-                        DebugFrameCard(frame: frame)
+                if horizontalSizeClass == .compact {
+                    VStack(spacing: 12) {
+                        ForEach(debugData.frames) { frame in
+                            DebugFrameCard(frame: frame)
+                        }
+                    }
+                } else {
+                    LazyVGrid(columns: frameColumns, alignment: .leading, spacing: 12) {
+                        ForEach(debugData.frames) { frame in
+                            DebugFrameCard(frame: frame)
+                        }
                     }
                 }
             } else {
@@ -1249,29 +1253,39 @@ private struct DebugFrameCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ZStack {
-                AsyncImage(url: resolvedFrameURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    default:
-                        ZStack {
-                            Color(hex: "FFF3E5")
+            Rectangle()
+                .fill(Color(hex: "FFF3E5"))
+                .frame(maxWidth: .infinity)
+                .aspectRatio(4 / 3, contentMode: .fit)
+                .overlay {
+                    AsyncImage(url: resolvedFrameURL) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        case .empty, .failure:
+                            ZStack {
+                                Color.clear
 
-                            Image(systemName: "photo")
-                                .font(.system(size: 22, weight: .bold))
-                                .foregroundStyle(PetPalTheme.inkSoft)
+                                Image(systemName: "photo")
+                                    .font(.system(size: 22, weight: .bold))
+                                    .foregroundStyle(PetPalTheme.inkSoft)
+                            }
+                        @unknown default:
+                            ZStack {
+                                Color.clear
+
+                                Image(systemName: "photo")
+                                    .font(.system(size: 22, weight: .bold))
+                                    .foregroundStyle(PetPalTheme.inkSoft)
+                            }
                         }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            }
-            .frame(maxWidth: .infinity)
-            .aspectRatio(4 / 3, contentMode: .fit)
-            .clipped()
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipped()
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("#\(frame.sequence)  \(frame.videoTimeText)")

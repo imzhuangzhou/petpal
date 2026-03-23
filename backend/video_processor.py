@@ -1,8 +1,11 @@
 import audioop
+import importlib
 import os
+import shutil
 import subprocess
 import uuid
 from datetime import datetime
+from typing import Optional
 
 import cv2
 
@@ -349,9 +352,26 @@ def get_video_duration(video_path: str) -> float:
 
 
 def _get_ffmpeg_executable() -> str:
+    for env_key in ("PETPAL_FFMPEG_PATH", "IMAGEIO_FFMPEG_EXE"):
+        configured_path = _resolve_executable(os.environ.get(env_key))
+        if configured_path:
+            return configured_path
+
+    system_ffmpeg = _resolve_executable("ffmpeg")
+    if system_ffmpeg:
+        return system_ffmpeg
+
     try:
-        import imageio_ffmpeg
+        imageio_ffmpeg = importlib.import_module("imageio_ffmpeg")
     except ImportError as exc:
-        raise RuntimeError("缺少 imageio-ffmpeg 依赖，无法裁剪视频。") from exc
+        raise RuntimeError(
+            "未找到可用的 ffmpeg。请安装系统 ffmpeg，或在后端环境中安装 imageio-ffmpeg。"
+        ) from exc
 
     return imageio_ffmpeg.get_ffmpeg_exe()
+
+
+def _resolve_executable(candidate: Optional[str]) -> Optional[str]:
+    if not candidate:
+        return None
+    return shutil.which(candidate)
