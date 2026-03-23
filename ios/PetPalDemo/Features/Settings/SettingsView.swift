@@ -925,6 +925,7 @@ struct SettingsView: View {
 private struct VideoAnalysisDebugView: View {
     @EnvironmentObject private var appStore: AppStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     let cameraID: Int
 
@@ -932,9 +933,13 @@ private struct VideoAnalysisDebugView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
 
-    private let frameColumns = [
-        GridItem(.adaptive(minimum: 196, maximum: 240), spacing: 12, alignment: .top)
-    ]
+    private var frameColumns: [GridItem] {
+        if horizontalSizeClass == .compact {
+            return [GridItem(.flexible(), spacing: 12, alignment: .top)]
+        }
+
+        return [GridItem(.adaptive(minimum: 196, maximum: 280), spacing: 12, alignment: .top)]
+    }
 
     var body: some View {
         PetPalShell {
@@ -1250,7 +1255,7 @@ private struct DebugFrameCard: View {
                     case .success(let image):
                         image
                             .resizable()
-                            .scaledToFill()
+                            .aspectRatio(contentMode: .fill)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     default:
                         ZStack {

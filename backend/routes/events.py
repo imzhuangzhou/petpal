@@ -101,7 +101,7 @@ def seed_demo_events(pet_id, camera_id, video_name=""):
     )
 
     return {
-        "message": f"✅ Demo data initialized: {len(created_events)} events created",
+        "message": f"Demo data initialized: {len(created_events)} events created",
         "events_count": len(created_events),
         "events": created_events,
         "context_summary": context_summary,

@@ -630,7 +630,7 @@ def get_health_alerts(pet_id: int) -> list:
     if not alerts:
         alerts.append({
             "level": "normal",
-            "title": "一切正常 ✅",
+            "title": "一切正常",
             "message": "今天各项行为指标都在正常范围内，宝贝很健康！",
         })
 

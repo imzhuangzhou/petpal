@@ -1,4 +1,5 @@
 import sys
+import re
 import types
 import unittest
 from pathlib import Path
@@ -42,6 +43,12 @@ class _FakeClient:
 
 
 class HealthAlertsTests(unittest.TestCase):
+    COPY_SYMBOL_PATTERN = re.compile(r"[\U0001F000-\U0001FAFF\u2600-\u27BF]")
+
+    def assert_alert_copy_is_clean(self, alert):
+        self.assertNotRegex(alert["title"], self.COPY_SYMBOL_PATTERN)
+        self.assertNotRegex(alert["message"], self.COPY_SYMBOL_PATTERN)
+
     @patch("dialogue_engine.get_today_events")
     def test_returns_normal_alert_when_events_are_within_expected_range(self, mock_get_today_events):
         mock_get_today_events.return_value = [
@@ -55,7 +62,8 @@ class HealthAlertsTests(unittest.TestCase):
 
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0]["level"], "normal")
-        self.assertIn("一切正常", alerts[0]["title"])
+        self.assertEqual(alerts[0]["title"], "一切正常")
+        self.assert_alert_copy_is_clean(alerts[0])
 
     @patch("dialogue_engine.get_today_events")
     def test_flags_excessive_drinking(self, mock_get_today_events):
@@ -73,6 +81,7 @@ class HealthAlertsTests(unittest.TestCase):
         self.assertEqual(alerts[0]["level"], "warning")
         self.assertEqual(alerts[0]["title"], "饮水频率偏高")
         self.assertIn("5次水", alerts[0]["message"])
+        self.assert_alert_copy_is_clean(alerts[0])
 
     @patch("dialogue_engine.get_today_events")
     def test_flags_missing_food_when_many_events_exist(self, mock_get_today_events):
@@ -90,6 +99,7 @@ class HealthAlertsTests(unittest.TestCase):
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0]["level"], "critical")
         self.assertEqual(alerts[0]["title"], "今天没有进食记录")
+        self.assert_alert_copy_is_clean(alerts[0])
 
 
 class AnxietyScoreTests(unittest.TestCase):

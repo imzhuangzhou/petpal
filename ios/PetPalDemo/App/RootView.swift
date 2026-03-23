@@ -939,27 +939,59 @@ func petPalBundledDemoVideoURL(named fileName: String) -> URL? {
         ?? Bundle.main.url(forResource: resourceName, withExtension: fileExtension, subdirectory: "DemoVideos")
 }
 
+enum PetPalPlayableVideoControlsStyle: String {
+    case system
+    case minimal
+}
+
 struct PetPalPlayableVideoView: View {
     let url: URL
+    var controlsStyle: PetPalPlayableVideoControlsStyle = .system
 
     var body: some View {
-        PetPalPlayableVideoContent(url: url)
-            .id(url.absoluteString)
+        PetPalPlayableVideoContent(url: url, controlsStyle: controlsStyle)
+            .id("\(url.absoluteString)-\(controlsStyle.rawValue)")
     }
 }
 
 private struct PetPalPlayableVideoContent: View {
     @StateObject private var controller: PetPalPlayableVideoController
 
-    init(url: URL) {
+    private let controlsStyle: PetPalPlayableVideoControlsStyle
+
+    init(url: URL, controlsStyle: PetPalPlayableVideoControlsStyle) {
         _controller = StateObject(wrappedValue: PetPalPlayableVideoController(url: url))
+        self.controlsStyle = controlsStyle
     }
 
     var body: some View {
         ZStack {
-            PetPalSystemVideoPlayer(player: controller.player)
+            playerSurface
                 .background(Color.black)
 
+            playbackOverlay
+        }
+        .contentShape(Rectangle())
+        .onDisappear {
+            controller.stopPlayback()
+        }
+    }
+
+    @ViewBuilder
+    private var playerSurface: some View {
+        switch controlsStyle {
+        case .system:
+            PetPalSystemVideoPlayer(player: controller.player)
+        case .minimal:
+            PetPalMinimalVideoPlayer(player: controller.player)
+                .allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder
+    private var playbackOverlay: some View {
+        switch controlsStyle {
+        case .system:
             if !controller.isPlaying {
                 Button {
                     controller.startPlayback()
@@ -995,10 +1027,41 @@ private struct PetPalPlayableVideoContent: View {
                 }
                 .buttonStyle(.plain)
             }
-        }
-        .contentShape(Rectangle())
-        .onDisappear {
-            controller.stopPlayback()
+        case .minimal:
+            Button {
+                controller.togglePlayback()
+            } label: {
+                Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: controller.isPlaying ? 18 : 24, weight: .black))
+                    .foregroundStyle(controller.isPlaying ? .white : PetPalTheme.caramel)
+                    .frame(
+                        width: controller.isPlaying ? 46 : 66,
+                        height: controller.isPlaying ? 46 : 66
+                    )
+                    .background(
+                        controller.isPlaying
+                            ? Color.black.opacity(0.34)
+                            : Color.white.opacity(0.94)
+                    )
+                    .clipShape(Circle())
+                    .shadow(color: Color.black.opacity(controller.isPlaying ? 0.22 : 0.12), radius: 14, y: 8)
+            }
+            .buttonStyle(.plain)
+            .padding(controller.isPlaying ? 18 : 0)
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: .infinity,
+                alignment: controller.isPlaying ? .bottomTrailing : .center
+            )
+            .background {
+                if !controller.isPlaying {
+                    LinearGradient(
+                        colors: [Color.black.opacity(0.04), Color.black.opacity(0.16), Color.black.opacity(0.28)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
+            }
         }
     }
 }
@@ -1010,9 +1073,26 @@ final class PetPalPlayableVideoController: ObservableObject {
 
     @Published var isPlaying = false
 
+    private var playbackEndedObserver: NSObjectProtocol?
+
     init(url: URL) {
         self.url = url
         self.player = AVPlayer(url: url)
+        self.playbackEndedObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: player.currentItem,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handlePlaybackEnded()
+            }
+        }
+    }
+
+    deinit {
+        if let playbackEndedObserver {
+            NotificationCenter.default.removeObserver(playbackEndedObserver)
+        }
     }
 
     func startPlayback() {
@@ -1021,8 +1101,22 @@ final class PetPalPlayableVideoController: ObservableObject {
         player.play()
     }
 
+    func pausePlayback() {
+        player.pause()
+        isPlaying = false
+    }
+
+    func togglePlayback() {
+        isPlaying ? pausePlayback() : startPlayback()
+    }
+
     func stopPlayback() {
         player.pause()
+        player.seek(to: .zero)
+        isPlaying = false
+    }
+
+    private func handlePlaybackEnded() {
         player.seek(to: .zero)
         isPlaying = false
     }
@@ -1045,6 +1139,33 @@ private struct PetPalSystemVideoPlayer: UIViewControllerRepresentable {
         if uiViewController.player !== player {
             uiViewController.player = player
         }
+    }
+}
+
+private struct PetPalMinimalVideoPlayer: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> PetPalVideoPlayerLayerView {
+        let view = PetPalVideoPlayerLayerView()
+        view.playerLayer.player = player
+        view.playerLayer.videoGravity = .resizeAspectFill
+        return view
+    }
+
+    func updateUIView(_ uiView: PetPalVideoPlayerLayerView, context: Context) {
+        if uiView.playerLayer.player !== player {
+            uiView.playerLayer.player = player
+        }
+    }
+}
+
+private final class PetPalVideoPlayerLayerView: UIView {
+    override class var layerClass: AnyClass {
+        AVPlayerLayer.self
+    }
+
+    var playerLayer: AVPlayerLayer {
+        layer as! AVPlayerLayer
     }
 }
 

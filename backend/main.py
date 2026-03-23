@@ -60,7 +60,7 @@ def startup():
 
 @app.get("/")
 def root():
-    return {"message": "🐾 PetPal API", "status": "running"}
+    return {"message": "PetPal API", "status": "running"}
 
 
 if __name__ == "__main__":

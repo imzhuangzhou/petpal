@@ -1,7 +1,6 @@
 import AVFoundation
 import AVKit
 import Foundation
-import PhotosUI
 import SwiftUI
 import UserNotifications
 
@@ -14,12 +13,7 @@ struct ChatView: View {
     @State private var messages: [ChatMessage] = []
     @State private var isSubmitting = false
     @State private var isCameraPanelExpanded = false
-    @State private var selectedContextVideoItem: PhotosPickerItem?
-    @State private var selectedPreviewVideo: PickedVideo?
-    @State private var latestCameraSummary: String?
-    @State private var isUploadingContextVideo = false
     @State private var errorMessage: String?
-    @State private var cameraPanelErrorMessage: String?
     @State private var healthAlerts: [HealthAlert] = []
     @State private var dailyReport: DailyReportResponse?
     @State private var anxietyReport: AnxietyResponse?
@@ -65,14 +59,8 @@ struct ChatView: View {
 
                 CameraContextPanel(
                     isExpanded: $isCameraPanelExpanded,
-                    selectedVideoItem: $selectedContextVideoItem,
                     previewURL: cameraPreviewURL,
-                    cameraName: cameraContextName,
                     statusText: cameraPanelStatusText,
-                    detailText: cameraPanelDetailText,
-                    videoName: appStore.session.demoVideoName.ifEmpty("未上传上下文视频"),
-                    isUploading: isUploadingContextVideo,
-                    errorMessage: cameraPanelErrorMessage,
                     onToggle: toggleCameraPanel
                 )
                 .padding(.horizontal, 18)
@@ -259,11 +247,6 @@ struct ChatView: View {
         .task {
             await loadInitialMessagesIfNeeded()
         }
-        .onChange(of: selectedContextVideoItem) {
-            Task {
-                await importCameraVideo(from: selectedContextVideoItem)
-            }
-        }
         .onChange(of: speechRecognizer.isListening) {
             guard !speechRecognizer.isListening, voiceCaptureState == .recording else { return }
             recordingTimer?.invalidate()
@@ -280,7 +263,6 @@ struct ChatView: View {
             _ = speechRecognizer.stopListening(discardRecording: true)
             voicePlayback.stop()
             cleanupVoiceMessageAudioFiles()
-            cleanupSelectedPreviewVideo()
         }
     }
 
@@ -311,10 +293,6 @@ struct ChatView: View {
     }
 
     private var cameraPreviewURL: URL? {
-        if let selectedPreviewVideo {
-            return selectedPreviewVideo.url
-        }
-
         if let bundledURL = petPalBundledDemoVideoURL(named: appStore.session.demoVideoName) {
             return bundledURL
         }
@@ -327,30 +305,9 @@ struct ChatView: View {
     }
 
     private var cameraPanelStatusText: String {
-        if isUploadingContextVideo {
-            return "正在解析新视频..."
-        }
-
-        if let cameraPanelErrorMessage {
-            return cameraPanelErrorMessage
-        }
-
-        return latestCameraSummary
-            ?? (hasCameraContextVideo
-                ? "\(cameraContextName) 已接入"
-                : "上传一段视频后，聊天会结合今天的画面。")
-    }
-
-    private var cameraPanelDetailText: String {
-        if isUploadingContextVideo {
-            return "解析完成后会立即更新到当前对话。"
-        }
-
-        if hasCameraContextVideo {
-            return "点开可查看或更新当前视频。"
-        }
-
-        return "展开后可从系统相册选择一段视频。"
+        hasCameraContextVideo
+            ? "\(cameraContextName) 已接入"
+            : "当前还没有可播放的视频。"
     }
 
     private var canSendMessage: Bool {
@@ -358,7 +315,7 @@ struct ChatView: View {
     }
 
     private var canTriggerPetSpeech: Bool {
-        !isSubmitting && !isUploadingContextVideo && appStore.session.petId != nil && appStore.session.cameraId != nil && hasCameraContextVideo
+        !isSubmitting && appStore.session.petId != nil && appStore.session.cameraId != nil && hasCameraContextVideo
     }
 
     private var isVoiceRecording: Bool {
@@ -1230,72 +1187,6 @@ struct ChatView: View {
         }
     }
 
-    private func importCameraVideo(from selectedItem: PhotosPickerItem?) async {
-        cameraPanelErrorMessage = nil
-        defer {
-            selectedContextVideoItem = nil
-        }
-
-        guard let selectedItem else { return }
-
-        do {
-            guard let pickedVideo = try await selectedItem.loadTransferable(type: PickedVideo.self) else {
-                cameraPanelErrorMessage = "无法读取你选择的视频，请重新试一次。"
-                return
-            }
-            await uploadContextVideo(pickedVideo)
-        } catch {
-            cameraPanelErrorMessage = "读取相册视频失败：\(error.localizedDescription)"
-        }
-    }
-
-    private func cleanupSelectedPreviewVideo() {
-        guard let selectedPreviewVideo else { return }
-        try? FileManager.default.removeItem(at: selectedPreviewVideo.url)
-        self.selectedPreviewVideo = nil
-    }
-
-    private func uploadContextVideo(_ pickedVideo: PickedVideo) async {
-        guard
-            let userID = appStore.session.userId,
-            let petID = appStore.session.petId
-        else {
-            cameraPanelErrorMessage = "当前会话信息不完整，暂时无法上传视频。"
-            try? FileManager.default.removeItem(at: pickedVideo.url)
-            return
-        }
-
-        isUploadingContextVideo = true
-        cameraPanelErrorMessage = nil
-        latestCameraSummary = nil
-
-        do {
-            let response = try await appStore.apiClient.uploadDemoVideo(
-                DemoVideoUploadRequest(
-                    userID: userID,
-                    petID: petID,
-                    cameraName: appStore.session.cameraName.ifEmpty("家庭摄像头"),
-                    cameraID: appStore.session.cameraId,
-                    videoFileURL: pickedVideo.url
-                )
-            )
-
-            cleanupSelectedPreviewVideo()
-            selectedPreviewVideo = pickedVideo
-            latestCameraSummary = response.contextSummary
-            appStore.applyUploadedDemoVideo(response)
-
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
-                isCameraPanelExpanded = true
-            }
-        } catch {
-            try? FileManager.default.removeItem(at: pickedVideo.url)
-            cameraPanelErrorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
-        }
-
-        isUploadingContextVideo = false
-    }
-
     private func sendTextMessage() async {
         await sendMessage(
             userMessage: ChatMessage(role: .user, content: draft.trimmingCharacters(in: .whitespacesAndNewlines)),
@@ -1767,18 +1658,12 @@ private struct DailyReportTagWrap: View {
 
 private struct CameraContextPanel: View {
     @Binding var isExpanded: Bool
-    @Binding var selectedVideoItem: PhotosPickerItem?
     let previewURL: URL?
-    let cameraName: String
     let statusText: String
-    let detailText: String
-    let videoName: String
-    let isUploading: Bool
-    let errorMessage: String?
     let onToggle: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("陪伴摄像头")
@@ -1787,7 +1672,7 @@ private struct CameraContextPanel: View {
 
                     Text(statusText)
                         .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .foregroundStyle(errorMessage == nil ? PetPalTheme.inkSoft : PetPalTheme.danger)
+                        .foregroundStyle(PetPalTheme.inkSoft)
                         .lineLimit(isExpanded ? 2 : 1)
                 }
 
@@ -1806,83 +1691,26 @@ private struct CameraContextPanel: View {
             }
 
             if isExpanded {
-                VStack(alignment: .leading, spacing: 12) {
-                    ZStack(alignment: .topLeading) {
-                        RoundedRectangle(cornerRadius: 26, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color(hex: "FFF7EE"), Color(hex: "F3ECE0")],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
+                ZStack {
+                    RoundedRectangle(cornerRadius: 30, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color(hex: "FFF7EE"), Color(hex: "F3ECE0")],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
                             )
+                        )
 
-                        CameraContextPreview(previewURL: previewURL)
-                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                            .padding(6)
-
-                        PetPalCapsuleLabel(text: cameraName, style: .context)
-                            .padding(16)
-
-                        PhotosPicker(
-                            selection: $selectedVideoItem,
-                            matching: .videos,
-                            photoLibrary: .shared()
-                        ) {
-                            Label(previewURL == nil ? "选择视频" : "重选视频", systemImage: "arrow.triangle.2.circlepath")
-                                .font(.system(size: 11, weight: .black, design: .rounded))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(.black.opacity(0.28))
-                                .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(isUploading)
-                        .padding(16)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                        .accessibilityLabel("选择摄像头视频")
-                        .accessibilityHint("从系统相册选择一段视频来更新聊天上下文")
-
-                        if isUploading {
-                            VStack(spacing: 10) {
-                                ProgressView()
-                                    .controlSize(.large)
-                                    .tint(.white)
-
-                                Text("正在解析上传视频")
-                                    .font(.system(size: 14, weight: .black, design: .rounded))
-                                    .foregroundStyle(.white)
-
-                                Text("完成后会立即更新聊天上下文")
-                                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                                    .foregroundStyle(.white.opacity(0.88))
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(.black.opacity(0.32))
-                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                            .padding(6)
-                        }
-                    }
-                    .aspectRatio(4 / 3, contentMode: .fit)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 26, style: .continuous)
-                            .stroke(PetPalTheme.line.opacity(0.9), lineWidth: 1.2)
-                    )
-                    .shadow(color: PetPalTheme.caramel.opacity(0.12), radius: 18, y: 10)
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(videoName)
-                            .font(.system(size: 13, weight: .black, design: .rounded))
-                            .foregroundStyle(PetPalTheme.ink)
-                            .lineLimit(1)
-
-                        Text(detailText)
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundStyle(PetPalTheme.inkSoft)
-                            .lineSpacing(3)
-                    }
+                    CameraContextPreview(previewURL: previewURL)
+                        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                        .padding(4)
                 }
+                .aspectRatio(16 / 9, contentMode: .fit)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 30, style: .continuous)
+                        .stroke(PetPalTheme.line.opacity(0.9), lineWidth: 1.2)
+                )
+                .shadow(color: PetPalTheme.caramel.opacity(0.12), radius: 18, y: 10)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
@@ -1896,7 +1724,6 @@ private struct CameraContextPanel: View {
                 .stroke(PetPalTheme.line.opacity(0.82), lineWidth: 1)
         )
         .shadow(color: PetPalTheme.caramel.opacity(0.1), radius: 14, y: 8)
-        .animation(.easeOut(duration: 0.22), value: isUploading)
     }
 }
 
@@ -1906,7 +1733,7 @@ private struct CameraContextPreview: View {
     var body: some View {
         ZStack {
             if let previewURL {
-                PetPalPlayableVideoView(url: previewURL)
+                PetPalPlayableVideoView(url: previewURL, controlsStyle: .minimal)
             } else {
                 mockCameraPreview
             }
@@ -1937,31 +1764,18 @@ private struct CameraContextPreview: View {
                 .frame(width: 106, height: 64)
                 .offset(x: 76, y: -14)
 
-            VStack(spacing: 10) {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(Color(hex: "EC7E6D"))
-                        .frame(width: 9, height: 9)
-
-                    Text("LIVE MOCK")
-                        .font(.system(size: 11, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.black.opacity(0.22))
-                .clipShape(Capsule())
-
-                Label("点击上传视频", systemImage: "video.badge.plus")
-                    .font(.system(size: 15, weight: .black, design: .rounded))
+            VStack(spacing: 12) {
+                Image(systemName: "video.slash.fill")
+                    .font(.system(size: 26, weight: .black))
                     .foregroundStyle(PetPalTheme.ink)
 
-                Text("从系统相册选择一段视频作为今天的上下文。")
+                Text("暂无摄像头画面")
+                    .font(.system(size: 16, weight: .black, design: .rounded))
+                    .foregroundStyle(PetPalTheme.ink)
+
+                Text("当前还没有可播放的视频。")
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(PetPalTheme.inkSoft)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(3)
-                    .padding(.horizontal, 28)
             }
         }
     }
@@ -2157,11 +1971,12 @@ private struct PetPalVoiceCallView: View {
                     .ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    monitorStage(height: max(proxy.size.height * 0.6, 360))
+                    monitorStage
+                        .frame(maxWidth: 520)
+                        .padding(.horizontal, 14)
+                        .padding(.top, 12)
                     Spacer(minLength: 0)
                 }
-
-                topBar
 
                 bottomControls
             }
@@ -2213,8 +2028,8 @@ private struct PetPalVoiceCallView: View {
         }
     }
 
-    private func monitorStage(height: CGFloat) -> some View {
-        ZStack(alignment: .bottom) {
+    private var monitorStage: some View {
+        ZStack {
             Group {
                 if let previewURL {
                     LoopingVideoPlayerView(url: previewURL)
@@ -2224,7 +2039,7 @@ private struct PetPalVoiceCallView: View {
             }
             .overlay {
                 LinearGradient(
-                    colors: [.clear, Color.black.opacity(0.12), Color.black.opacity(0.45)],
+                    colors: [Color.black.opacity(0.2), .clear, Color.black.opacity(0.14), Color.black.opacity(0.52)],
                     startPoint: .top,
                     endPoint: .bottom
                 )
@@ -2235,68 +2050,23 @@ private struct PetPalVoiceCallView: View {
                     .stroke(Color.white.opacity(0.14), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.28), radius: 24, y: 14)
-            .padding(.horizontal, 14)
-            .padding(.top, 18)
-
-            VStack(spacing: 16) {
-                Spacer(minLength: 0)
-
-                HStack(alignment: .center, spacing: 12) {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color(hex: "FFD8B5"), Color(hex: "F6BE95")],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 48, height: 48)
-                        .overlay(
-                            PetPalImageFill(
-                                imageURL: petAvatarImageURL,
-                                fallbackAsset: petAvatar,
-                                artSize: 24,
-                                contentMode: .fill
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .padding(4)
-                        )
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("\(petName) 正在陪伴通话")
-                            .font(.system(size: 20, weight: .black, design: .rounded))
-                            .foregroundStyle(.white)
-
-                        Text(cameraName)
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color.white.opacity(0.74))
-                    }
-
-                    Spacer(minLength: 0)
-                }
-
-                HStack(spacing: 10) {
-                    liveBadge
-
-                    Label("陪伴中", systemImage: "waveform")
-                        .font(.system(size: 12, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.white.opacity(0.12))
-                        .clipShape(Capsule())
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .top) {
+                monitorTopOverlay
+                    .padding(.horizontal, 18)
+                    .padding(.top, 18)
             }
-            .padding(.horizontal, 34)
-            .padding(.bottom, 30)
+            .overlay(alignment: .bottomLeading) {
+                monitorBottomOverlay
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 22)
+            }
         }
-        .frame(height: height)
+        .aspectRatio(16 / 9, contentMode: .fit)
     }
 
-    private var topBar: some View {
-        VStack(spacing: 0) {
-            HStack {
+    private var monitorTopOverlay: some View {
+        HStack(spacing: 12) {
+            Group {
                 Button {
                     dismiss()
                 } label: {
@@ -2309,27 +2079,82 @@ private struct PetPalVoiceCallView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("返回聊天")
+            }
+            .frame(width: 84, alignment: .leading)
 
-                Spacer(minLength: 12)
+            Text("语音通话")
+                .font(.system(size: 17, weight: .black, design: .rounded))
+                .foregroundStyle(.white.opacity(0.94))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
 
-                Text("语音通话")
-                    .font(.system(size: 17, weight: .black, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.92))
-
-                Spacer(minLength: 12)
-
+            Group {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     Text(context.date, format: .dateTime.hour().minute())
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.72))
-                        .frame(width: 56, alignment: .trailing)
+                        .font(.system(size: 13, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(Color.white.opacity(0.82))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.9)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .frame(width: 84, alignment: .trailing)
                 }
                 .accessibilityLabel("当前时间")
             }
-            .padding(.horizontal, 20)
-            .safeAreaPadding(.top, 8)
+            .frame(width: 84, alignment: .trailing)
+        }
+    }
 
-            Spacer()
+    private var monitorBottomOverlay: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(hex: "FFD8B5"), Color(hex: "F6BE95")],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 48, height: 48)
+                    .overlay(
+                        PetPalImageFill(
+                            imageURL: petAvatarImageURL,
+                            fallbackAsset: petAvatar,
+                            artSize: 24,
+                            contentMode: .fill
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .padding(4)
+                    )
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(petName) 正在陪伴通话")
+                        .font(.system(size: 20, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.84)
+
+                    Text(cameraName)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.76))
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 10) {
+                liveBadge
+
+                Label("陪伴中", systemImage: "waveform")
+                    .font(.system(size: 12, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.white.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -2552,32 +2377,6 @@ private struct VoiceCallMockMonitorView: View {
                     .multilineTextAlignment(.center)
                     .lineSpacing(3)
                     .padding(.horizontal, 32)
-            }
-
-            VStack {
-                HStack {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("客厅机位")
-                            .font(.system(size: 11, weight: .black, design: .rounded))
-                            .foregroundStyle(Color.white.opacity(0.82))
-
-                        Text("Signal 98%")
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color.white.opacity(0.58))
-                    }
-
-                    Spacer()
-
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        Text(context.date, format: .dateTime.hour().minute().second())
-                            .font(.system(size: 11, weight: .black, design: .rounded).monospacedDigit())
-                            .foregroundStyle(.white.opacity(0.82))
-                    }
-                    .accessibilityHidden(true)
-                }
-                .padding(18)
-
-                Spacer()
             }
 
             VStack(spacing: 18) {
