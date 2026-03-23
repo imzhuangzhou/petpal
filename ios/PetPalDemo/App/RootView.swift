@@ -537,6 +537,7 @@ struct PetPalStepIndicator: View {
 struct PetPalInfoRow: View {
     let title: String
     let value: String
+    var valueColor: Color = PetPalTheme.ink
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -548,7 +549,7 @@ struct PetPalInfoRow: View {
 
             Text(value)
                 .font(.system(size: 14, weight: .heavy, design: .rounded))
-                .foregroundStyle(PetPalTheme.ink)
+                .foregroundStyle(valueColor)
                 .multilineTextAlignment(.trailing)
         }
     }
@@ -556,7 +557,12 @@ struct PetPalInfoRow: View {
 
 struct PetPalLoadingOverlay: View {
     let title: String
-    let subtitle: String
+    let subtitle: String?
+
+    init(title: String, subtitle: String? = nil) {
+        self.title = title
+        self.subtitle = subtitle
+    }
 
     var body: some View {
         ZStack {
@@ -572,11 +578,13 @@ struct PetPalLoadingOverlay: View {
                     .font(.system(size: 16, weight: .black, design: .rounded))
                     .foregroundStyle(PetPalTheme.ink)
 
-                Text(subtitle)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundStyle(PetPalTheme.inkSoft)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(3)
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(PetPalTheme.inkSoft)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                }
             }
             .padding(24)
             .frame(maxWidth: 300)
@@ -917,7 +925,30 @@ struct PetPalInlineFeedback: View {
     }
 }
 
+func petPalBundledDemoVideoURL(named fileName: String) -> URL? {
+    let trimmedName = fileName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedName.isEmpty else { return nil }
+
+    let lastPathComponent = URL(fileURLWithPath: trimmedName).lastPathComponent
+    let resourceName = (lastPathComponent as NSString).deletingPathExtension
+    let fileExtension = (lastPathComponent as NSString).pathExtension.isEmpty
+        ? "mp4"
+        : (lastPathComponent as NSString).pathExtension
+
+    return Bundle.main.url(forResource: resourceName, withExtension: fileExtension)
+        ?? Bundle.main.url(forResource: resourceName, withExtension: fileExtension, subdirectory: "DemoVideos")
+}
+
 struct PetPalPlayableVideoView: View {
+    let url: URL
+
+    var body: some View {
+        PetPalPlayableVideoContent(url: url)
+            .id(url.absoluteString)
+    }
+}
+
+private struct PetPalPlayableVideoContent: View {
     @StateObject private var controller: PetPalPlayableVideoController
 
     init(url: URL) {
@@ -926,18 +957,16 @@ struct PetPalPlayableVideoView: View {
 
     var body: some View {
         ZStack {
-            if controller.isPlaying {
-                PetPalSystemVideoPlayer(player: controller.player)
-                    .background(Color.black)
-            } else {
+            PetPalSystemVideoPlayer(player: controller.player)
+                .background(Color.black)
+
+            if !controller.isPlaying {
                 Button {
                     controller.startPlayback()
                 } label: {
                     ZStack {
-                        thumbnailBackground
-
                         LinearGradient(
-                            colors: [.clear, Color.black.opacity(0.16), Color.black.opacity(0.36)],
+                            colors: [Color.black.opacity(0.08), Color.black.opacity(0.2), Color.black.opacity(0.36)],
                             startPoint: .top,
                             endPoint: .bottom
                         )
@@ -968,33 +997,8 @@ struct PetPalPlayableVideoView: View {
             }
         }
         .contentShape(Rectangle())
-        .task {
-            await controller.loadThumbnailIfNeeded()
-        }
         .onDisappear {
             controller.stopPlayback()
-        }
-    }
-
-    @ViewBuilder
-    private var thumbnailBackground: some View {
-        if let thumbnail = controller.thumbnail {
-            Image(uiImage: thumbnail)
-                .resizable()
-                .scaledToFill()
-        } else {
-            ZStack {
-                LinearGradient(
-                    colors: [Color(hex: "E8DED0"), Color(hex: "D5E2DB"), Color(hex: "F5E6D8")],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-
-                Image(systemName: "video.fill")
-                    .font(.system(size: 30, weight: .black))
-                    .foregroundStyle(Color.white.opacity(0.9))
-                    .shadow(color: Color.black.opacity(0.12), radius: 8, y: 4)
-            }
         }
     }
 }
@@ -1004,26 +1008,11 @@ final class PetPalPlayableVideoController: ObservableObject {
     let url: URL
     let player: AVPlayer
 
-    @Published var thumbnail: UIImage?
     @Published var isPlaying = false
-
-    private var hasLoadedThumbnail = false
 
     init(url: URL) {
         self.url = url
         self.player = AVPlayer(url: url)
-    }
-
-    func loadThumbnailIfNeeded() async {
-        guard !hasLoadedThumbnail else { return }
-        hasLoadedThumbnail = true
-
-        let url = self.url
-        let image = await Task.detached(priority: .userInitiated) {
-            PetPalPlayableVideoController.generateThumbnail(for: url)
-        }.value
-
-        thumbnail = image
     }
 
     func startPlayback() {
@@ -1036,20 +1025,6 @@ final class PetPalPlayableVideoController: ObservableObject {
         player.pause()
         player.seek(to: .zero)
         isPlaying = false
-    }
-
-    nonisolated private static func generateThumbnail(for url: URL) -> UIImage? {
-        let asset = AVURLAsset(url: url)
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 1_600, height: 1_600)
-
-        do {
-            let cgImage = try generator.copyCGImage(at: .zero, actualTime: nil)
-            return UIImage(cgImage: cgImage)
-        } catch {
-            return nil
-        }
     }
 }
 

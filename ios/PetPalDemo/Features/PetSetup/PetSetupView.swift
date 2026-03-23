@@ -52,7 +52,7 @@ struct PetSetupView: View {
                     ZStack {
                         ScrollView(showsIndicators: false) {
                             VStack(spacing: 16) {
-                                PetPalStepIndicator(total: 2, current: currentStep)
+                                PetPalStepIndicator(total: 3, current: currentStep)
 
                                 if currentStep == 0 {
                                     stepOneIdentityCard()
@@ -244,7 +244,7 @@ struct PetSetupView: View {
 
     private var primaryButtonTitle: String {
         switch currentStep {
-        case 0:
+        case 0, 1:
             return "下一步"
         default:
             return "完成建档"
@@ -338,7 +338,7 @@ struct PetSetupView: View {
             VStack(alignment: .leading, spacing: 8) {
                 PetPalFieldLabel(title: "名字", required: true)
 
-                TextField("例如：发财、奶盖、奥利奥...", text: $petName)
+                TextField("例如：团团、年糕、栗子、十一", text: $petName)
                     .petPalTextFieldStyle(isInvalid: stepOneFieldError(for: .petName) != nil)
                     .focused($focusedField, equals: .petName)
                     .accessibilityFocused($accessibilityFocusedField, equals: .petName)
@@ -354,7 +354,7 @@ struct PetSetupView: View {
             VStack(alignment: .leading, spacing: 8) {
                 PetPalFieldLabel(title: "它怎么称呼你", required: true)
 
-                TextField("例如：boss、妈妈、小陈...", text: $ownerAlias)
+                TextField("例如：人类、铲屎官、妈咪、小主", text: $ownerAlias)
                     .petPalTextFieldStyle(isInvalid: stepOneFieldError(for: .ownerAlias) != nil)
                     .focused($focusedField, equals: .ownerAlias)
                     .accessibilityFocused($accessibilityFocusedField, equals: .ownerAlias)
@@ -404,17 +404,12 @@ struct PetSetupView: View {
     @ViewBuilder
     private func stepTwoContent(contentWidth: CGFloat, isCompactLayout: Bool, scrollProxy: ScrollViewProxy) -> some View {
         PetSetupStepHeader(
-            eyebrow: "聊天人格",
-            title: "它平时会怎么跟你说话？",
-            subtitle: "选一种聊天语气，让它更像你熟悉的样子。不改也可以直接完成建档。",
-            chipText: "Step 2",
+            eyebrow: nil,
+            title: "对话风格",
+            subtitle: "选一种聊天语气，让它更像你熟悉的样子。",
+            chipText: nil,
             stampAsset: currentHeroArtAsset,
-            stampImageURL: currentHeroImageURL,
-            onSkip: {
-                Task {
-                    await skipStyleStep(scrollProxy: scrollProxy)
-                }
-            }
+            stampImageURL: currentHeroImageURL
         )
 
         LazyVGrid(columns: optionColumns(for: contentWidth), spacing: 12) {
@@ -737,11 +732,6 @@ struct PetSetupView: View {
         }
     }
 
-    private func skipStyleStep(scrollProxy: ScrollViewProxy) async {
-        style = "tsundere"
-        await createPet(scrollProxy: scrollProxy)
-    }
-
     private func persistDraftAndNavigateToCamera() {
         let draft = currentPetSetupDraft
         appStore.applyPetSetupDraft(draft)
@@ -955,22 +945,20 @@ struct PetSetupView: View {
 }
 
 private struct PetSetupStepHeader: View {
-    let eyebrow: String
+    let eyebrow: String?
     let title: String
     let subtitle: String?
     let chipText: String?
     let stampAsset: PetPalArtAsset?
     let stampImageURL: URL?
-    var onSkip: (() -> Void)? = nil
 
     init(
-        eyebrow: String,
+        eyebrow: String? = nil,
         title: String,
         subtitle: String? = nil,
         chipText: String? = nil,
         stampAsset: PetPalArtAsset? = nil,
-        stampImageURL: URL? = nil,
-        onSkip: (() -> Void)? = nil
+        stampImageURL: URL? = nil
     ) {
         self.eyebrow = eyebrow
         self.title = title
@@ -978,53 +966,52 @@ private struct PetSetupStepHeader: View {
         self.chipText = chipText
         self.stampAsset = stampAsset
         self.stampImageURL = stampImageURL
-        self.onSkip = onSkip
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            HStack(alignment: .center, spacing: 14) {
+        VStack(alignment: .leading, spacing: 14) {
+            if eyebrow != nil || chipText != nil {
+                HStack(alignment: .center, spacing: 10) {
+                    if let eyebrow {
+                        Text(eyebrow)
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(PetPalTheme.caramel)
+                            .tracking(1)
+                    }
+
+                    if let chipText {
+                        PetPalCapsuleLabel(text: chipText, style: .soft)
+                            .scaleEffect(0.92, anchor: .leading)
+                    }
+
+                    Spacer(minLength: 8)
+                }
+            }
+
+            HStack(alignment: .top, spacing: 12) {
                 if let stampAsset {
                     PetPalStamp(fallbackAsset: stampAsset, imageURL: stampImageURL)
+                        .scaleEffect(0.82)
+                        .frame(width: 58, height: 58)
+                        .padding(.top, 2)
+                        .accessibilityHidden(true)
                 }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(eyebrow)
-                        .font(.system(size: 12, weight: .black, design: .rounded))
-                        .foregroundStyle(PetPalTheme.caramel)
-                        .textCase(.uppercase)
-                        .tracking(1.2)
-
+                VStack(alignment: .leading, spacing: 8) {
                     Text(title)
-                        .font(.system(size: 18, weight: .black, design: .rounded))
+                        .font(.system(size: 17, weight: .black, design: .rounded))
                         .foregroundStyle(PetPalTheme.ink)
                         .fixedSize(horizontal: false, vertical: true)
 
                     if let subtitle {
                         Text(subtitle)
-                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .font(.system(size: 14, weight: .medium, design: .rounded))
                             .foregroundStyle(PetPalTheme.inkSoft)
-                            .lineSpacing(3)
+                            .lineSpacing(4)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .layoutPriority(1)
-
-            Spacer(minLength: 8)
-
-            VStack(alignment: .trailing, spacing: 8) {
-                if let chipText {
-                    PetPalCapsuleLabel(text: chipText, style: .sticker)
-                }
-
-                if let onSkip {
-                    Button("跳过") {
-                        onSkip()
-                    }
-                    .buttonStyle(PetPalSmallGhostButtonStyle())
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }

@@ -24,6 +24,8 @@ struct DemoVideoUploadView: View {
                 ZStack {
                     ScrollView(showsIndicators: false) {
                         VStack(spacing: 16) {
+                            PetPalStepIndicator(total: 3, current: 2)
+
                             PetPalPanelCard {
                                 HStack(alignment: .bottom, spacing: 12) {
                                     PetPalSectionHeader(
@@ -57,20 +59,30 @@ struct DemoVideoUploadView: View {
                                     }
                                 }
 
-                                Button {
-                                    presentRadarScanner()
-                                } label: {
+                                if selectedCamera == nil {
+                                    Button {
+                                        presentRadarScanner()
+                                    } label: {
+                                        CameraBindingCard(
+                                            camera: selectedCamera,
+                                            bundledVideo: bundledVideo,
+                                            isConnecting: isConnecting,
+                                            showsValidationHighlight: cameraInlineFeedbackMessage != nil
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("添加摄像头")
+                                    .accessibilityHint("进入雷达扫描页，搜索附近的家庭摄像头")
+                                    .id(DemoUploadScrollTarget.cameraBinding.rawValue)
+                                } else {
                                     CameraBindingCard(
                                         camera: selectedCamera,
                                         bundledVideo: bundledVideo,
                                         isConnecting: isConnecting,
                                         showsValidationHighlight: cameraInlineFeedbackMessage != nil
                                     )
+                                    .id(DemoUploadScrollTarget.cameraBinding.rawValue)
                                 }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(selectedCamera == nil ? "添加摄像头" : "重新搜索摄像头")
-                                .accessibilityHint("进入雷达扫描页，搜索附近的家庭摄像头")
-                                .id(DemoUploadScrollTarget.cameraBinding.rawValue)
 
                                 PetPalSurfaceCard {
                                     PetPalInfoRow(
@@ -79,7 +91,8 @@ struct DemoVideoUploadView: View {
                                     )
                                     PetPalInfoRow(
                                         title: "连接状态",
-                                        value: connectionStatusText
+                                        value: connectionStatusText,
+                                        valueColor: connectionStatusColor
                                     )
                                 }
 
@@ -100,8 +113,7 @@ struct DemoVideoUploadView: View {
 
                     if isUploading {
                         PetPalLoadingOverlay(
-                            title: "正在同步摄像头回放...",
-                            subtitle: "我们会把当前摄像头对应的回放视频和设备名称一起上传。"
+                            title: "正在配置摄像头..."
                         )
                     }
                 }
@@ -191,6 +203,10 @@ struct DemoVideoUploadView: View {
         }
 
         return "等待绑定"
+    }
+
+    private var connectionStatusColor: Color {
+        connectionStatusText == "已连接" ? PetPalTheme.success : PetPalTheme.ink
     }
 
     private func presentRadarScanner() {
@@ -515,24 +531,23 @@ private struct CameraFeedPreview: View {
         switch camera.videoSource {
         case .bundledPetSpecies:
             if let bundledURL = Bundle.main.url(forResource: bundledVideo.name, withExtension: bundledVideo.fileExtension) {
-                BundledCameraFeedView(camera: camera, videoURL: bundledURL)
+                BundledCameraFeedView(videoURL: bundledURL)
             } else {
-                MockCameraFeedView(camera: camera)
+                MockCameraFeedView()
             }
         case let .bundledResource(name, fileExtension):
             if let bundledURL = Bundle.main.url(forResource: name, withExtension: fileExtension) {
-                BundledCameraFeedView(camera: camera, videoURL: bundledURL)
+                BundledCameraFeedView(videoURL: bundledURL)
             } else {
-                MockCameraFeedView(camera: camera)
+                MockCameraFeedView()
             }
         case .generatedMock:
-            MockCameraFeedView(camera: camera)
+            MockCameraFeedView()
         }
     }
 }
 
 private struct BundledCameraFeedView: View {
-    let camera: MockCameraDevice
     let videoURL: URL
 
     var body: some View {
@@ -547,26 +562,8 @@ private struct BundledCameraFeedView: View {
 
             HStack(spacing: 8) {
                 PetPalCapsuleLabel(text: "LIVE", style: .hero)
-
-                Text("回放预览")
-                    .font(.system(size: 12, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .frame(height: 30)
-                    .background(Color.black.opacity(0.24))
-                    .clipShape(Capsule())
             }
             .padding(14)
-
-            Text(camera.name)
-                .font(.system(size: 13, weight: .black, design: .rounded))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .frame(height: 32)
-                .background(Color.black.opacity(0.2))
-                .clipShape(Capsule())
-                .padding(14)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
@@ -577,8 +574,6 @@ private struct BundledCameraFeedView: View {
 }
 
 private struct MockCameraFeedView: View {
-    let camera: MockCameraDevice
-
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.12)) { context in
             GeometryReader { proxy in
@@ -652,15 +647,6 @@ private struct MockCameraFeedView: View {
                     }
                     .padding(14)
 
-                    Text(camera.name)
-                        .font(.system(size: 13, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .frame(height: 32)
-                        .background(Color.black.opacity(0.16))
-                        .clipShape(Capsule())
-                        .padding(14)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 }
             }
         }
@@ -689,7 +675,7 @@ private struct LoopingMutedVideoView: View {
     }
 
     var body: some View {
-        VideoPlayer(player: controller.player)
+        LoopingMutedPlayerContainer(player: controller.player)
             .disabled(true)
             .allowsHitTesting(false)
             .onAppear {
@@ -698,6 +684,33 @@ private struct LoopingMutedVideoView: View {
             .onDisappear {
                 controller.pause()
             }
+    }
+}
+
+private struct LoopingMutedPlayerContainer: UIViewRepresentable {
+    let player: AVQueuePlayer
+
+    func makeUIView(context: Context) -> LoopingMutedPlayerView {
+        let view = LoopingMutedPlayerView()
+        view.playerLayer.player = player
+        view.playerLayer.videoGravity = .resizeAspectFill
+        return view
+    }
+
+    func updateUIView(_ uiView: LoopingMutedPlayerView, context: Context) {
+        if uiView.playerLayer.player !== player {
+            uiView.playerLayer.player = player
+        }
+    }
+}
+
+private final class LoopingMutedPlayerView: UIView {
+    override class var layerClass: AnyClass {
+        AVPlayerLayer.self
+    }
+
+    var playerLayer: AVPlayerLayer {
+        layer as! AVPlayerLayer
     }
 }
 

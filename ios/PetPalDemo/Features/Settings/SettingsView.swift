@@ -40,35 +40,38 @@ struct SettingsView: View {
 
     var body: some View {
         PetPalShell {
-            ZStack {
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 16) {
-                        PetPalNavigationHeader(
-                            title: "设置",
-                            onBack: { dismiss() }
-                        )
+            VStack(spacing: 16) {
+                PetPalNavigationHeader(
+                    title: "设置",
+                    onBack: { dismiss() }
+                )
+                .padding(.horizontal, 20)
 
-                        petInfoSection
-                        cameraSection
-                        resetSection
+                ZStack {
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 16) {
+                            petInfoSection
+                            cameraSection
+                            resetSection
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 32)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 32)
-                }
-                .safeAreaPadding(.top, 12)
-                .scrollBounceBehavior(.basedOnSize)
+                    .scrollBounceBehavior(.basedOnSize)
 
-                if isUploadingVideo {
-                    PetPalLoadingOverlay(
-                        title: "正在更新联调视频...",
-                        subtitle: "新的摄像头上下文会在上传完成后立即生效。"
-                    )
-                } else if isSavingPet {
-                    PetPalLoadingOverlay(
-                        title: "正在更新宠物资料...",
-                        subtitle: "保存后聊天风格和宠物档案会立刻刷新。"
-                    )
+                    if isUploadingVideo {
+                        PetPalLoadingOverlay(
+                            title: "正在更新联调视频...",
+                            subtitle: "新的摄像头上下文会在上传完成后立即生效。"
+                        )
+                    } else if isSavingPet {
+                        PetPalLoadingOverlay(
+                            title: "正在更新宠物资料...",
+                            subtitle: "保存后聊天风格和宠物档案会立刻刷新。"
+                        )
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
         .alert("确认重置当前配置？", isPresented: $isShowingResetConfirmation) {
@@ -366,6 +369,10 @@ struct SettingsView: View {
     private var selectedPreviewURL: URL? {
         if let selectedVideo {
             return selectedVideo.url
+        }
+
+        if let bundledURL = petPalBundledDemoVideoURL(named: appStore.session.demoVideoName) {
+            return bundledURL
         }
 
         return appStore.apiClient.resolvedURL(for: appStore.session.demoVideoURL)
@@ -931,42 +938,45 @@ private struct VideoAnalysisDebugView: View {
 
     var body: some View {
         PetPalShell {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) {
-                    PetPalNavigationHeader(
-                        title: "视频分析测试",
-                        onBack: { dismiss() }
-                    ) {
-                        Button {
-                            Task {
-                                await loadDebugData(showLoader: false)
-                            }
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 16, weight: .black))
-                                .frame(width: 18, height: 18)
+            VStack(spacing: 16) {
+                PetPalNavigationHeader(
+                    title: "视频分析测试",
+                    onBack: { dismiss() }
+                ) {
+                    Button {
+                        Task {
+                            await loadDebugData(showLoader: false)
                         }
-                        .buttonStyle(PetPalSmallGhostButtonStyle())
-                        .accessibilityLabel("刷新调试数据")
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 16, weight: .black))
+                            .frame(width: 18, height: 18)
                     }
-
-                    currentVideoSection
-                    processingSection
-                    framesSection
-                    eventsSection
-
-                    if let errorMessage {
-                        PetPalInlineFeedback(message: errorMessage, tone: .warning)
-                    }
+                    .buttonStyle(PetPalSmallGhostButtonStyle())
+                    .accessibilityLabel("刷新调试数据")
                 }
                 .padding(.horizontal, 20)
-                .padding(.bottom, 32)
+
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 16) {
+                        currentVideoSection
+                        processingSection
+                        framesSection
+                        eventsSection
+
+                        if let errorMessage {
+                            PetPalInlineFeedback(message: errorMessage, tone: .warning)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 32)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .refreshable {
+                    await loadDebugData(showLoader: false)
+                }
             }
-            .safeAreaPadding(.top, 12)
-            .scrollBounceBehavior(.basedOnSize)
-            .refreshable {
-                await loadDebugData(showLoader: false)
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .navigationBarBackButtonHidden()
         .toolbar(.hidden, for: .navigationBar)
@@ -996,17 +1006,17 @@ private struct VideoAnalysisDebugView: View {
             }
 
             PetPalSurfaceCard {
-                PetPalInfoRow(
+                DebugMetadataRow(
                     title: "Camera ID",
                     value: String(cameraID)
                 )
 
-                PetPalInfoRow(
+                DebugMetadataRow(
                     title: "视频地址",
                     value: currentVideoPath
                 )
 
-                PetPalInfoRow(
+                DebugMetadataRow(
                     title: "最后更新",
                     value: lastUpdatedText
                 )
@@ -1106,6 +1116,14 @@ private struct VideoAnalysisDebugView: View {
         let path = (debugData?.demoVideoURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
             ? (debugData?.demoVideoURL ?? "")
             : appStore.session.demoVideoURL
+        let preferredName = (debugData?.demoVideoName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+            ? (debugData?.demoVideoName ?? "")
+            : appStore.session.demoVideoName
+
+        if let bundledURL = petPalBundledDemoVideoURL(named: preferredName) {
+            return bundledURL
+        }
+
         return appStore.apiClient.resolvedURL(for: path)
     }
 
@@ -1159,6 +1177,26 @@ private struct VideoAnalysisDebugView: View {
         }
 
         isLoading = false
+    }
+}
+
+private struct DebugMetadataRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(PetPalTheme.inkSoft)
+
+            Text(value)
+                .font(.system(size: 14, weight: .heavy, design: .rounded))
+                .foregroundStyle(PetPalTheme.ink)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 
@@ -1270,40 +1308,46 @@ private struct DebugEventCard: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            AsyncImage(url: resolvedFrameURL) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                default:
-                    ZStack {
-                        Color(hex: "FFF3E5")
-                        Image(systemName: "film.stack")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundStyle(PetPalTheme.inkSoft)
+            ZStack {
+                AsyncImage(url: resolvedFrameURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        ZStack {
+                            Color(hex: "FFF3E5")
+                            Image(systemName: "film.stack")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundStyle(PetPalTheme.inkSoft)
+                        }
                     }
                 }
             }
-            .frame(width: 76, height: 76)
+            .frame(width: 84, height: 84)
+            .clipped()
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
             VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(event.eventType.ifEmpty("other"))
                         .font(.system(size: 14, weight: .black, design: .rounded))
                         .foregroundStyle(PetPalTheme.ink)
+                        .lineLimit(1)
 
                     Text(event.timestamp)
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundStyle(PetPalTheme.inkSoft)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
 
                 Text(event.description)
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(PetPalTheme.ink)
                     .lineSpacing(3)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Text("持续 \(Int(event.durationSeconds)) 秒")
                     .font(.system(size: 12, weight: .bold, design: .rounded))
@@ -1315,10 +1359,12 @@ private struct DebugEventCard: View {
                         .foregroundStyle(PetPalTheme.inkSoft)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Spacer(minLength: 0)
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(hex: "FFF8EE").opacity(0.95))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)

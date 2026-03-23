@@ -315,6 +315,10 @@ struct ChatView: View {
             return selectedPreviewVideo.url
         }
 
+        if let bundledURL = petPalBundledDemoVideoURL(named: appStore.session.demoVideoName) {
+            return bundledURL
+        }
+
         return appStore.apiClient.resolvedURL(for: appStore.session.demoVideoURL)
     }
 
@@ -1803,59 +1807,69 @@ private struct CameraContextPanel: View {
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 12) {
-                    PhotosPicker(
-                        selection: $selectedVideoItem,
-                        matching: .videos,
-                        photoLibrary: .shared()
-                    ) {
-                        ZStack(alignment: .topLeading) {
-                            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [Color(hex: "FFF7EE"), Color(hex: "F3ECE0")],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
+                    ZStack(alignment: .topLeading) {
+                        RoundedRectangle(cornerRadius: 26, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(hex: "FFF7EE"), Color(hex: "F3ECE0")],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
                                 )
+                            )
 
-                            CameraContextPreview(previewURL: previewURL)
-                                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                                .padding(6)
+                        CameraContextPreview(previewURL: previewURL)
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                            .padding(6)
 
-                            PetPalCapsuleLabel(text: cameraName, style: .context)
-                                .padding(16)
+                        PetPalCapsuleLabel(text: cameraName, style: .context)
+                            .padding(16)
 
-                            if isUploading {
-                                VStack(spacing: 10) {
-                                    ProgressView()
-                                        .controlSize(.large)
-                                        .tint(.white)
-
-                                    Text("正在解析上传视频")
-                                        .font(.system(size: 14, weight: .black, design: .rounded))
-                                        .foregroundStyle(.white)
-
-                                    Text("完成后会立即更新聊天上下文")
-                                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                                        .foregroundStyle(.white.opacity(0.88))
-                                }
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .background(.black.opacity(0.32))
-                                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                                .padding(6)
-                            }
+                        PhotosPicker(
+                            selection: $selectedVideoItem,
+                            matching: .videos,
+                            photoLibrary: .shared()
+                        ) {
+                            Label(previewURL == nil ? "选择视频" : "重选视频", systemImage: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 11, weight: .black, design: .rounded))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(.black.opacity(0.28))
+                                .clipShape(Capsule())
                         }
-                        .aspectRatio(4 / 3, contentMode: .fit)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                                .stroke(PetPalTheme.line.opacity(0.9), lineWidth: 1.2)
-                        )
-                        .shadow(color: PetPalTheme.caramel.opacity(0.12), radius: 18, y: 10)
+                        .buttonStyle(.plain)
+                        .disabled(isUploading)
+                        .padding(16)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                        .accessibilityLabel("选择摄像头视频")
+                        .accessibilityHint("从系统相册选择一段视频来更新聊天上下文")
+
+                        if isUploading {
+                            VStack(spacing: 10) {
+                                ProgressView()
+                                    .controlSize(.large)
+                                    .tint(.white)
+
+                                Text("正在解析上传视频")
+                                    .font(.system(size: 14, weight: .black, design: .rounded))
+                                    .foregroundStyle(.white)
+
+                                Text("完成后会立即更新聊天上下文")
+                                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.88))
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(.black.opacity(0.32))
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                            .padding(6)
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .disabled(isUploading)
-                    .accessibilityLabel("选择摄像头视频")
-                    .accessibilityHint("从系统相册选择一段视频来更新聊天上下文")
+                    .aspectRatio(4 / 3, contentMode: .fit)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 26, style: .continuous)
+                            .stroke(PetPalTheme.line.opacity(0.9), lineWidth: 1.2)
+                    )
+                    .shadow(color: PetPalTheme.caramel.opacity(0.12), radius: 18, y: 10)
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text(videoName)
@@ -1893,16 +1907,6 @@ private struct CameraContextPreview: View {
         ZStack {
             if let previewURL {
                 PetPalPlayableVideoView(url: previewURL)
-                    .overlay(alignment: .bottomTrailing) {
-                        Label("重选视频", systemImage: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 11, weight: .black, design: .rounded))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(.black.opacity(0.28))
-                            .clipShape(Capsule())
-                            .padding(14)
-                    }
             } else {
                 mockCameraPreview
             }
