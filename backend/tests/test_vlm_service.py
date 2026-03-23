@@ -52,20 +52,33 @@ class FakeImage(_AttrObject):
     pass
 
 
-class FakeEditImageConfig(_AttrObject):
+class FakeGenerateContentConfig(_AttrObject):
     pass
 
 
-class FakeEditMode:
-    EDIT_MODE_CONTROLLED_EDITING = "EDIT_MODE_CONTROLLED_EDITING"
+class FakeImageConfig(_AttrObject):
+    pass
+
+
+class FakePart(_AttrObject):
+    @classmethod
+    def from_bytes(cls, *, data, mime_type):
+        return cls(inline_data=_AttrObject(data=data, mime_type=mime_type))
+
+
+class FakeModality:
+    TEXT = "TEXT"
+    IMAGE = "IMAGE"
 
 
 fake_google_genai_types = types.ModuleType("google.genai.types")
 fake_google_genai_types.HttpOptions = FakeHttpOptions
 fake_google_genai_types.RawReferenceImage = FakeRawReferenceImage
 fake_google_genai_types.Image = FakeImage
-fake_google_genai_types.EditImageConfig = FakeEditImageConfig
-fake_google_genai_types.EditMode = FakeEditMode
+fake_google_genai_types.GenerateContentConfig = FakeGenerateContentConfig
+fake_google_genai_types.ImageConfig = FakeImageConfig
+fake_google_genai_types.Part = FakePart
+fake_google_genai_types.Modality = FakeModality
 
 
 class FakeClient:
@@ -226,12 +239,25 @@ class GeneratePetAvatarTests(unittest.TestCase):
             def __init__(self):
                 self.last_kwargs = None
 
-            def edit_image(self, **kwargs):
+            def generate_content(self, **kwargs):
                 self.last_kwargs = kwargs
-                generated = _AttrObject(
-                    image=_AttrObject(image_bytes=b"generated-avatar", mime_type="image/png")
+                return _AttrObject(
+                    candidates=[
+                        _AttrObject(
+                            content=_AttrObject(
+                                parts=[
+                                    _AttrObject(text="生成成功"),
+                                    _AttrObject(
+                                        inline_data=_AttrObject(
+                                            data=b"generated-avatar",
+                                            mime_type="image/png",
+                                        )
+                                    ),
+                                ]
+                            )
+                        )
+                    ]
                 )
-                return _AttrObject(generated_images=[generated])
 
         class FakeImageClient:
             def __init__(self):
@@ -256,26 +282,43 @@ class GeneratePetAvatarTests(unittest.TestCase):
         self.assertEqual(mime_type, "image/png")
         self.assertTrue(fake_client.closed)
 
+        contents = fake_client.models.last_kwargs["contents"]
         self.assertEqual(
-            fake_client.models.last_kwargs["prompt"],
-            vlm_service._build_pet_avatar_prompt("dog", "毛色：奶油白；眼睛：琥珀色"),
+            contents[0],
+            vlm_service._build_pet_avatar_generation_prompt("dog", "毛色：奶油白；眼睛：琥珀色"),
         )
+        self.assertEqual(contents[1].inline_data.data, b"reference-bytes")
+        self.assertEqual(contents[1].inline_data.mime_type, "image/jpeg")
         config = fake_client.models.last_kwargs["config"]
-        self.assertEqual(config.aspect_ratio, "1:1")
-        self.assertEqual(config.base_steps, 35)
-        self.assertEqual(config.negative_prompt, vlm_service._build_pet_avatar_negative_prompt())
+        self.assertEqual(
+            config.response_modalities,
+            [vlm_service.genai_types.Modality.TEXT, vlm_service.genai_types.Modality.IMAGE],
+        )
+        self.assertEqual(config.image_config.aspect_ratio, "1:1")
 
     def test_generate_pet_avatar_falls_back_when_identity_extraction_fails(self):
         class FakeModels:
             def __init__(self):
                 self.last_kwargs = None
 
-            def edit_image(self, **kwargs):
+            def generate_content(self, **kwargs):
                 self.last_kwargs = kwargs
-                generated = _AttrObject(
-                    image=_AttrObject(image_bytes=b"generated-avatar", mime_type="image/png")
+                return _AttrObject(
+                    candidates=[
+                        _AttrObject(
+                            content=_AttrObject(
+                                parts=[
+                                    _AttrObject(
+                                        inline_data=_AttrObject(
+                                            data=b"generated-avatar",
+                                            mime_type="image/png",
+                                        )
+                                    )
+                                ]
+                            )
+                        )
+                    ]
                 )
-                return _AttrObject(generated_images=[generated])
 
         class FakeImageClient:
             def __init__(self):
@@ -296,9 +339,110 @@ class GeneratePetAvatarTests(unittest.TestCase):
             vlm_service.generate_pet_avatar("/tmp/pet.jpg", "cat")
 
         self.assertEqual(
-            fake_client.models.last_kwargs["prompt"],
-            vlm_service._build_pet_avatar_prompt("cat", ""),
+            fake_client.models.last_kwargs["contents"][0],
+            vlm_service._build_pet_avatar_generation_prompt("cat", ""),
         )
+
+    def test_generate_pet_avatar_reads_top_level_response_parts(self):
+        class FakeModels:
+            def generate_content(self, **kwargs):
+                return _AttrObject(
+                    parts=[
+                        _AttrObject(text="生成成功"),
+                        _AttrObject(
+                            inline_data=_AttrObject(
+                                data=b"top-level-image",
+                                mime_type="image/webp",
+                            )
+                        ),
+                    ]
+                )
+
+        class FakeImageClient:
+            def __init__(self):
+                self.models = FakeModels()
+
+            def close(self):
+                return None
+
+        with patch("vlm_service.get_image_client", return_value=FakeImageClient()), patch(
+            "vlm_service._load_pet_avatar_reference_image",
+            return_value=(b"reference-bytes", "image/jpeg"),
+        ), patch(
+            "vlm_service._extract_pet_avatar_identity_summary",
+            return_value="",
+        ):
+            image_bytes, mime_type = vlm_service.generate_pet_avatar("/tmp/pet.jpg", "cat")
+
+        self.assertEqual(image_bytes, b"top-level-image")
+        self.assertEqual(mime_type, "image/webp")
+
+    def test_generate_pet_avatar_raises_when_no_image_part_is_returned(self):
+        class FakeModels:
+            def generate_content(self, **kwargs):
+                return _AttrObject(
+                    candidates=[
+                        _AttrObject(
+                            content=_AttrObject(
+                                parts=[_AttrObject(text="只有文字，没有图片")]
+                            )
+                        )
+                    ]
+                )
+
+        class FakeImageClient:
+            def __init__(self):
+                self.models = FakeModels()
+
+            def close(self):
+                return None
+
+        with patch("vlm_service.get_image_client", return_value=FakeImageClient()), patch(
+            "vlm_service._load_pet_avatar_reference_image",
+            return_value=(b"reference-bytes", "image/jpeg"),
+        ), patch(
+            "vlm_service._extract_pet_avatar_identity_summary",
+            return_value="",
+        ):
+            with self.assertRaisesRegex(RuntimeError, "没有返回可用的图片结果"):
+                vlm_service.generate_pet_avatar("/tmp/pet.jpg", "dog")
+
+    def test_generate_pet_avatar_raises_when_image_bytes_are_empty(self):
+        class FakeModels:
+            def generate_content(self, **kwargs):
+                return _AttrObject(
+                    candidates=[
+                        _AttrObject(
+                            content=_AttrObject(
+                                parts=[
+                                    _AttrObject(
+                                        inline_data=_AttrObject(
+                                            data=b"",
+                                            mime_type="image/png",
+                                        )
+                                    )
+                                ]
+                            )
+                        )
+                    ]
+                )
+
+        class FakeImageClient:
+            def __init__(self):
+                self.models = FakeModels()
+
+            def close(self):
+                return None
+
+        with patch("vlm_service.get_image_client", return_value=FakeImageClient()), patch(
+            "vlm_service._load_pet_avatar_reference_image",
+            return_value=(b"reference-bytes", "image/jpeg"),
+        ), patch(
+            "vlm_service._extract_pet_avatar_identity_summary",
+            return_value="",
+        ):
+            with self.assertRaisesRegex(RuntimeError, "返回了空图片内容"):
+                vlm_service.generate_pet_avatar("/tmp/pet.jpg", "dog")
 
 
 if __name__ == "__main__":

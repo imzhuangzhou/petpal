@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from dialogue_engine import (
-    generate_daily_report,
+    generate_daily_report_payload,
     generate_diary,
     get_health_alerts,
     get_anxiety_score,
@@ -12,8 +12,8 @@ router = APIRouter(prefix="/api", tags=["features"])
 @router.get("/report/daily/{pet_id}")
 def daily_report(pet_id: int):
     try:
-        report = generate_daily_report(pet_id)
-        return {"report": report, "pet_id": pet_id}
+        payload = generate_daily_report_payload(pet_id)
+        return {**payload, "pet_id": pet_id}
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

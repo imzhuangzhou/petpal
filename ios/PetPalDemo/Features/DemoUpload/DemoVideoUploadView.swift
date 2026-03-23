@@ -11,93 +11,109 @@ struct DemoVideoUploadView: View {
     @State private var errorMessage: String?
     @State private var connectionTask: Task<Void, Never>?
     @State private var radarSessionID = UUID()
+    @State private var hasAttemptedCompletion = false
 
     var body: some View {
         PetPalShell {
-            ZStack {
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 16) {
-                        PetPalPanelCard {
-                            PetPalSectionHeader(
-                                eyebrow: "摄像头",
-                                title: "搜索并绑定摄像头",
-                                chipText: nil
-                            )
+            ScrollViewReader { scrollProxy in
+                ZStack {
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 16) {
+                            PetPalPanelCard {
+                                PetPalSectionHeader(
+                                    eyebrow: "摄像头",
+                                    title: "搜索并绑定摄像头",
+                                    chipText: nil
+                                )
+
+                                Button {
+                                    presentRadarScanner()
+                                } label: {
+                                    CameraBindingCard(
+                                        camera: selectedCamera,
+                                        isConnecting: isConnecting,
+                                        showsValidationHighlight: cameraInlineFeedbackMessage != nil
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(selectedCamera == nil ? "添加摄像头" : "重新搜索摄像头")
+                                .accessibilityHint("进入雷达扫描页，搜索附近的家庭摄像头")
+                                .id(DemoUploadScrollTarget.cameraBinding.rawValue)
+
+                                PetPalSurfaceCard {
+                                    PetPalInfoRow(
+                                        title: "当前设备",
+                                        value: selectedCamera?.name ?? "暂未选择"
+                                    )
+                                    PetPalInfoRow(
+                                        title: "连接状态",
+                                        value: connectionStatusText
+                                    )
+
+                                    Text(selectedCamera == nil ? "点按上方卡片开始搜索。" : "点按上方卡片可重新搜索或切换设备。")
+                                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                                        .foregroundStyle(PetPalTheme.inkSoft)
+                                }
+
+                                if let cameraInlineFeedbackMessage {
+                                    PetPalInlineFeedback(message: cameraInlineFeedbackMessage, tone: .warning)
+                                }
+
+                                if let errorMessage {
+                                    PetPalInlineFeedback(message: errorMessage, tone: .danger)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 24)
+                    }
+                    .safeAreaPadding(.top, 12)
+                    .scrollBounceBehavior(.basedOnSize)
+
+                    if isUploading {
+                        PetPalLoadingOverlay(
+                            title: "正在同步摄像头回放...",
+                            subtitle: "我们会自动生成一段联调视频，并把它和摄像头名称一起上传。"
+                        )
+                    }
+                }
+                .safeAreaInset(edge: .bottom) {
+                    VStack {
+                        HStack(spacing: 10) {
+                            Button("上一步") {
+                                returnToPetStyleSelection()
+                            }
+                            .buttonStyle(PetPalSecondaryButtonStyle())
+                            .frame(width: 118)
+                            .disabled(isUploading)
 
                             Button {
-                                presentRadarScanner()
+                                Task {
+                                    await completeConfiguration(scrollProxy: scrollProxy)
+                                }
                             } label: {
-                                CameraBindingCard(
-                                    camera: selectedCamera,
-                                    isConnecting: isConnecting
-                                )
+                                Text("完成配置")
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(selectedCamera == nil ? "添加摄像头" : "重新搜索摄像头")
-                            .accessibilityHint("进入雷达扫描页，搜索附近的家庭摄像头")
-
-                            PetPalSurfaceCard {
-                                PetPalInfoRow(
-                                    title: "当前设备",
-                                    value: selectedCamera?.name ?? "暂未选择"
-                                )
-                                PetPalInfoRow(
-                                    title: "连接状态",
-                                    value: connectionStatusText
-                                )
-
-                                Text(selectedCamera == nil ? "点按上方卡片开始搜索。" : "点按上方卡片可重新搜索或切换设备。")
-                                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                                    .foregroundStyle(PetPalTheme.inkSoft)
-                            }
-
-                            if let errorMessage {
-                                Text(errorMessage)
-                                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                                    .foregroundStyle(PetPalTheme.danger)
-                            }
+                            .buttonStyle(PetPalPrimaryButtonStyle())
+                            .disabled(isUploading)
                         }
                     }
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 24)
-                }
-                .safeAreaPadding(.top, 12)
-                .scrollBounceBehavior(.basedOnSize)
-
-                if isUploading {
-                    PetPalLoadingOverlay(
-                        title: "正在同步摄像头回放...",
-                        subtitle: "我们会自动生成一段联调视频，并把它和摄像头名称一起上传。"
+                    .padding(.top, 12)
+                    .padding(.bottom, 16)
+                    .background(
+                        LinearGradient(
+                            colors: [
+                                PetPalTheme.cream0.opacity(0),
+                                PetPalTheme.cream0.opacity(0.96),
+                                PetPalTheme.cream0
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
                     )
                 }
             }
-        }
-        .safeAreaInset(edge: .bottom) {
-            VStack {
-                Button {
-                    Task {
-                        await completeConfiguration()
-                    }
-                } label: {
-                    Text("完成配置")
-                }
-                .buttonStyle(PetPalPrimaryButtonStyle())
-                .disabled(!canCompleteConfiguration)
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 12)
-            .padding(.bottom, 16)
-            .background(
-                LinearGradient(
-                    colors: [
-                        PetPalTheme.cream0.opacity(0),
-                        PetPalTheme.cream0.opacity(0.96),
-                        PetPalTheme.cream0
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
         }
         .fullScreenCover(isPresented: $isRadarPresented) {
             CameraRadarScanView(
@@ -112,12 +128,25 @@ struct DemoVideoUploadView: View {
         }
     }
 
-    private var canCompleteConfiguration: Bool {
-        !isUploading &&
-        !isConnecting &&
-        selectedCamera != nil &&
-        appStore.session.userId != nil &&
-        appStore.session.petId != nil
+    private var completionBlocker: DemoUploadCompletionBlocker? {
+        if appStore.session.userId == nil || appStore.session.petId == nil {
+            return .sessionUnavailable
+        }
+
+        if selectedCamera == nil {
+            return .cameraMissing
+        }
+
+        if isConnecting {
+            return .cameraConnecting
+        }
+
+        return nil
+    }
+
+    private var cameraInlineFeedbackMessage: String? {
+        guard hasAttemptedCompletion else { return nil }
+        return completionBlocker?.inlineMessage
     }
 
     private var connectionStatusText: String {
@@ -142,6 +171,15 @@ struct DemoVideoUploadView: View {
         isRadarPresented = true
     }
 
+    private func returnToPetStyleSelection() {
+        connectionTask?.cancel()
+        connectionTask = nil
+        isConnecting = false
+        isRadarPresented = false
+        errorMessage = nil
+        appStore.onboardingRoute = .petSetup(step: 1)
+    }
+
     private func beginBinding(camera: MockCameraDevice) {
         errorMessage = nil
         connectionTask?.cancel()
@@ -162,7 +200,21 @@ struct DemoVideoUploadView: View {
         }
     }
 
-    private func completeConfiguration() async {
+    private func presentCompletionBlocker(_ blocker: DemoUploadCompletionBlocker, scrollProxy: ScrollViewProxy) {
+        hasAttemptedCompletion = true
+        PetPalHaptics.warning()
+
+        withAnimation(.easeInOut(duration: 0.22)) {
+            scrollProxy.scrollTo(DemoUploadScrollTarget.cameraBinding.rawValue, anchor: .center)
+        }
+    }
+
+    private func completeConfiguration(scrollProxy: ScrollViewProxy) async {
+        if let blocker = completionBlocker {
+            presentCompletionBlocker(blocker, scrollProxy: scrollProxy)
+            return
+        }
+
         guard
             let userID = appStore.session.userId,
             let petID = appStore.session.petId,
@@ -173,6 +225,7 @@ struct DemoVideoUploadView: View {
         }
 
         isUploading = true
+        hasAttemptedCompletion = true
         errorMessage = nil
 
         var generatedVideoURL: URL?
@@ -206,9 +259,31 @@ struct DemoVideoUploadView: View {
     }
 }
 
+private enum DemoUploadScrollTarget: String {
+    case cameraBinding
+}
+
+private enum DemoUploadCompletionBlocker {
+    case sessionUnavailable
+    case cameraMissing
+    case cameraConnecting
+
+    var inlineMessage: String {
+        switch self {
+        case .sessionUnavailable:
+            return "请先完成宠物建档，再回来绑定摄像头。"
+        case .cameraMissing:
+            return "先搜索并绑定一个摄像头，才能完成当前配置。"
+        case .cameraConnecting:
+            return "摄像头还在连接中，连上后就能继续完成配置。"
+        }
+    }
+}
+
 private struct CameraBindingCard: View {
     let camera: MockCameraDevice?
     let isConnecting: Bool
+    let showsValidationHighlight: Bool
 
     var body: some View {
         ZStack {
@@ -248,7 +323,11 @@ private struct CameraBindingCard: View {
     }
 
     private var cardBorder: Color {
-        isConnecting ? Color(hex: "E8B48C") : PetPalTheme.lineStrong
+        if showsValidationHighlight {
+            return PetPalTheme.danger.opacity(0.72)
+        }
+
+        return isConnecting ? Color(hex: "E8B48C") : PetPalTheme.lineStrong
     }
 
     private var emptyCard: some View {

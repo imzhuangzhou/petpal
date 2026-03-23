@@ -87,11 +87,26 @@ def init_db():
             FOREIGN KEY (pet_id) REFERENCES pets(id)
         );
 
+        CREATE TABLE IF NOT EXISTS video_analysis_debug_snapshots (
+            camera_id INTEGER PRIMARY KEY,
+            pet_id INTEGER NOT NULL,
+            demo_video_name TEXT DEFAULT '',
+            demo_video_url TEXT DEFAULT '',
+            context_summary TEXT DEFAULT '',
+            processing_status TEXT DEFAULT 'completed',
+            step_states_json TEXT DEFAULT '[]',
+            frames_json TEXT DEFAULT '[]',
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (camera_id) REFERENCES cameras(id),
+            FOREIGN KEY (pet_id) REFERENCES pets(id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_events_pet_id ON events(pet_id);
         CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
         CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
         CREATE INDEX IF NOT EXISTS idx_chat_pet_id ON chat_history(pet_id);
         CREATE INDEX IF NOT EXISTS idx_chat_created_at ON chat_history(created_at);
+        CREATE INDEX IF NOT EXISTS idx_video_analysis_debug_pet_id ON video_analysis_debug_snapshots(pet_id);
     """)
 
     ensure_column(cursor, "pets", "voice_type", "TEXT DEFAULT 'preset'")
@@ -111,7 +126,7 @@ def init_db():
     print("✅ Database initialized successfully")
 
 
-_VALID_TABLES = {"users", "pets", "cameras", "events", "chat_history"}
+_VALID_TABLES = {"users", "pets", "cameras", "events", "chat_history", "video_analysis_debug_snapshots"}
 _VALID_COLUMN_PATTERNS = {
     "pets": {"voice_type", "voice_key", "voice_label", "voice_sample_path", "owner_alias"},
     "cameras": {"demo_video_path", "demo_video_name"},

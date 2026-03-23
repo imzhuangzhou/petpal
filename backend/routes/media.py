@@ -1,8 +1,9 @@
+import logging
+import json
 import os
 import shutil
-import uuid
-import logging
 import time
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -34,6 +35,15 @@ os.makedirs(AVATAR_UPLOADS_DIR, exist_ok=True)
 
 MAX_ANALYSIS_FRAMES = 10
 logger = logging.getLogger(__name__)
+
+DEBUG_STEP_DEFINITIONS = [
+    ("video_saved", "视频已保存"),
+    ("frames_extracted", "抽帧完成"),
+    ("frames_classified", "逐帧分类完成"),
+    ("events_merged", "事件合并完成"),
+    ("events_persisted", "事件入库完成"),
+    ("completed", "处理完成"),
+]
 
 
 def save_upload_file(upload, target_dir):
@@ -76,6 +86,59 @@ def _build_event_timestamp(seconds_from_start: float, max_seconds: float) -> dat
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     base_time = max(today_start, now - timedelta(seconds=max_seconds))
     return base_time + timedelta(seconds=seconds_from_start)
+
+
+def _format_video_seconds(seconds: float) -> str:
+    total_seconds = max(int(seconds), 0)
+    minutes = total_seconds // 60
+    remaining_seconds = total_seconds % 60
+    return f"{minutes:02d}:{remaining_seconds:02d}"
+
+
+def _build_debug_step_states() -> list[dict]:
+    return [
+        {
+            "id": step_id,
+            "title": title,
+            "state": "completed",
+        }
+        for step_id, title in DEBUG_STEP_DEFINITIONS
+    ]
+
+
+def _serialize_debug_frame(frame: dict, sequence: int) -> dict:
+    return {
+        "sequence": sequence,
+        "frame_url": frame["frame_path"],
+        "video_seconds": frame["video_seconds"],
+        "video_time_text": _format_video_seconds(frame["video_seconds"]),
+        "event_type": frame["event_type"],
+        "description": frame["description"],
+    }
+
+
+def _serialize_debug_event(event: dict) -> dict:
+    return {
+        "id": event.get("id"),
+        "event_type": event.get("event_type", ""),
+        "description": event.get("description", ""),
+        "timestamp": event.get("timestamp", ""),
+        "duration_seconds": event.get("duration_seconds", 0),
+        "frame_url": event.get("frame_path", ""),
+    }
+
+
+def _load_json_list(payload: Optional[str]) -> list[dict]:
+    if not payload:
+        return []
+
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError:
+        logger.warning("Invalid debug snapshot JSON payload: %s", payload[:120])
+        return []
+
+    return parsed if isinstance(parsed, list) else []
 
 
 def _merge_analyzed_frames(analyzed_frames: list[dict]) -> list[dict]:
@@ -135,7 +198,7 @@ def _summarize_analyzed_events(events: list[dict], video_name: str) -> str:
     return f"已根据上传视频《{video_name}》识别出 {len(events)} 段行为事件，主要包括{highlights}。"
 
 
-def _analyze_uploaded_video(video_path: str, original_filename: str) -> tuple[list[dict], str]:
+def _analyze_uploaded_video(video_path: str, original_filename: str) -> tuple[list[dict], str, list[dict]]:
     if not DASHSCOPE_API_KEY:
         raise RuntimeError("未配置 DASHSCOPE_API_KEY，暂时无法解析上传视频。")
 
@@ -172,7 +235,11 @@ def _analyze_uploaded_video(video_path: str, original_filename: str) -> tuple[li
 
     merged_events = _merge_analyzed_frames(analyzed_frames)
     context_summary = _summarize_analyzed_events(merged_events, original_filename)
-    return merged_events, context_summary
+    debug_frames = [
+        _serialize_debug_frame(frame, sequence=index + 1)
+        for index, frame in enumerate(analyzed_frames)
+    ]
+    return merged_events, context_summary, debug_frames
 
 
 def _persist_analyzed_events(
@@ -228,6 +295,52 @@ def _persist_analyzed_events(
 
     invalidate_event_cache(pet_id)
     return target_camera_id
+
+
+def _persist_video_analysis_debug_snapshot(
+    *,
+    camera_id: int,
+    pet_id: int,
+    demo_video_name: str,
+    demo_video_url: str,
+    context_summary: str,
+    frames: list[dict],
+):
+    execute_db(
+        """
+        INSERT INTO video_analysis_debug_snapshots (
+            camera_id,
+            pet_id,
+            demo_video_name,
+            demo_video_url,
+            context_summary,
+            processing_status,
+            step_states_json,
+            frames_json,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(camera_id) DO UPDATE SET
+            pet_id = excluded.pet_id,
+            demo_video_name = excluded.demo_video_name,
+            demo_video_url = excluded.demo_video_url,
+            context_summary = excluded.context_summary,
+            processing_status = excluded.processing_status,
+            step_states_json = excluded.step_states_json,
+            frames_json = excluded.frames_json,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (
+            camera_id,
+            pet_id,
+            demo_video_name,
+            demo_video_url,
+            context_summary,
+            "completed",
+            json.dumps(_build_debug_step_states(), ensure_ascii=False),
+            json.dumps(frames, ensure_ascii=False),
+        ),
+    )
 
 
 @router.post("/pet/avatar/generate")
@@ -306,7 +419,7 @@ def upload_demo_video(
     original_filename = video.filename or stored_name
 
     try:
-        analyzed_events, context_summary = _analyze_uploaded_video(file_path, original_filename)
+        analyzed_events, context_summary, debug_frames = _analyze_uploaded_video(file_path, original_filename)
         target_camera_id = _persist_analyzed_events(
             user_id=user_id,
             pet_id=pet_id,
@@ -315,6 +428,14 @@ def upload_demo_video(
             video_relative_path=relative_path,
             original_filename=original_filename,
             analyzed_events=analyzed_events,
+        )
+        _persist_video_analysis_debug_snapshot(
+            camera_id=target_camera_id,
+            pet_id=pet_id,
+            demo_video_name=original_filename,
+            demo_video_url=relative_path,
+            context_summary=context_summary,
+            frames=debug_frames,
         )
     except HTTPException:
         try:
@@ -336,6 +457,64 @@ def upload_demo_video(
         "demo_video_url": relative_path,
         "context_summary": context_summary,
         "events_count": len(analyzed_events),
+    }
+
+
+@router.get("/debug/video-analysis/{camera_id}")
+def get_video_analysis_debug(camera_id: int):
+    camera = query_db(
+        "SELECT id, name, status, demo_video_path, demo_video_name FROM cameras WHERE id = ?",
+        (camera_id,),
+        one=True,
+    )
+    if not camera:
+        raise HTTPException(status_code=404, detail="Camera not found")
+
+    snapshot = query_db(
+        """
+        SELECT camera_id, pet_id, demo_video_name, demo_video_url, context_summary,
+               processing_status, step_states_json, frames_json, updated_at
+        FROM video_analysis_debug_snapshots
+        WHERE camera_id = ?
+        """,
+        (camera_id,),
+        one=True,
+    )
+    events = query_db(
+        """
+        SELECT id, pet_id, event_type, description, timestamp, duration_seconds, frame_path
+        FROM events
+        WHERE camera_id = ?
+        ORDER BY timestamp DESC
+        """,
+        (camera_id,),
+    )
+
+    pet_id = (
+        snapshot.get("pet_id")
+        if snapshot
+        else (events[0].get("pet_id") if events else None)
+    )
+
+    return {
+        "camera_id": camera_id,
+        "pet_id": pet_id,
+        "demo_video_name": (
+            snapshot.get("demo_video_name")
+            if snapshot and snapshot.get("demo_video_name")
+            else camera.get("demo_video_name", "")
+        ),
+        "demo_video_url": (
+            snapshot.get("demo_video_url")
+            if snapshot and snapshot.get("demo_video_url")
+            else camera.get("demo_video_path", "")
+        ),
+        "context_summary": snapshot.get("context_summary", "") if snapshot else "",
+        "processing_status": snapshot.get("processing_status", "not_available") if snapshot else "not_available",
+        "step_states": _load_json_list(snapshot.get("step_states_json")) if snapshot else [],
+        "frames": _load_json_list(snapshot.get("frames_json")) if snapshot else [],
+        "events": [_serialize_debug_event(event) for event in events],
+        "last_updated_at": snapshot.get("updated_at") if snapshot else None,
     }
 
 

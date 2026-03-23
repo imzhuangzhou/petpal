@@ -57,7 +57,7 @@
 		A2000001000000000000000B /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		A2000001000000000000000C /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A2000001000000000000000D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A2000001000000000000000E /* PetPalDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = PetPalDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A2000001000000000000000E /* PetPal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = PetPal.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2000001000000000000000F /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
 		A20000020000000000000001 /* APIError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIError.swift; sourceTree = "<group>"; };
 		A20000020000000000000002 /* Endpoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Endpoint.swift; sourceTree = "<group>"; };
@@ -92,17 +92,6 @@
 		};
 /* End PBXFrameworksBuildPhase section */
 
-/* Begin PBXResourcesBuildPhase section */
-		A30000010000000000000003 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				A10000030000000000000002 /* Assets.xcassets in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXResourcesBuildPhase section */
-
 /* Begin PBXGroup section */
 		A40000010000000000000001 = {
 			isa = PBXGroup;
@@ -126,7 +115,7 @@
 		A40000010000000000000003 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				A2000001000000000000000E /* PetPalDemo.app */,
+				A2000001000000000000000E /* PetPal.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -269,9 +258,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		A50000010000000000000001 /* PetPalDemo */ = {
+		A50000010000000000000001 /* PetPal */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = A70000010000000000000002 /* Build configuration list for PBXNativeTarget "PetPalDemo" */;
+			buildConfigurationList = A70000010000000000000002 /* Build configuration list for PBXNativeTarget "PetPal" */;
 			buildPhases = (
 				A30000010000000000000002 /* Sources */,
 				A30000010000000000000001 /* Frameworks */,
@@ -281,9 +270,9 @@
 			);
 			dependencies = (
 			);
-			name = PetPalDemo;
+			name = PetPal;
 			productName = PetPalDemo;
-			productReference = A2000001000000000000000E /* PetPalDemo.app */;
+			productReference = A2000001000000000000000E /* PetPal.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -313,10 +302,21 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				A50000010000000000000001 /* PetPalDemo */,
+				A50000010000000000000001 /* PetPal */,
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A30000010000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000030000000000000002 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		A30000010000000000000002 /* Sources */ = {
@@ -405,7 +405,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = MRJK3JZ9D2;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PetPalDemo/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -429,7 +429,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = MRJK3JZ9D2;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PetPalDemo/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -458,7 +458,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		A70000010000000000000002 /* Build configuration list for PBXNativeTarget "PetPalDemo" */ = {
+		A70000010000000000000002 /* Build configuration list for PBXNativeTarget "PetPal" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A80000010000000000000003 /* Debug */,

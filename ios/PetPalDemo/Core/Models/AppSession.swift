@@ -9,6 +9,7 @@ struct AppSession: Codable {
     var petSpecies: String
     var petPhotoURL: String
     var petAvatarURL: String
+    var petDefaultAvatarAssetName: String
     var languageStyle: String
     var cameraId: Int?
     var cameraName: String
@@ -25,6 +26,7 @@ struct AppSession: Codable {
         petSpecies: String = "cat",
         petPhotoURL: String = "",
         petAvatarURL: String = "",
+        petDefaultAvatarAssetName: String = "",
         languageStyle: String = "tsundere",
         cameraId: Int? = nil,
         cameraName: String = "",
@@ -40,6 +42,7 @@ struct AppSession: Codable {
         self.petSpecies = petSpecies
         self.petPhotoURL = petPhotoURL
         self.petAvatarURL = petAvatarURL
+        self.petDefaultAvatarAssetName = petDefaultAvatarAssetName
         self.languageStyle = languageStyle
         self.cameraId = cameraId
         self.cameraName = cameraName
@@ -57,6 +60,7 @@ struct AppSession: Codable {
         case petSpecies
         case petPhotoURL
         case petAvatarURL
+        case petDefaultAvatarAssetName
         case languageStyle
         case cameraId
         case cameraName
@@ -75,6 +79,7 @@ struct AppSession: Codable {
         petSpecies = try container.decodeIfPresent(String.self, forKey: .petSpecies) ?? "cat"
         petPhotoURL = try container.decodeIfPresent(String.self, forKey: .petPhotoURL) ?? ""
         petAvatarURL = try container.decodeIfPresent(String.self, forKey: .petAvatarURL) ?? ""
+        petDefaultAvatarAssetName = try container.decodeIfPresent(String.self, forKey: .petDefaultAvatarAssetName) ?? ""
         languageStyle = try container.decodeIfPresent(String.self, forKey: .languageStyle) ?? "tsundere"
         cameraId = try container.decodeIfPresent(Int.self, forKey: .cameraId)
         cameraName = try container.decodeIfPresent(String.self, forKey: .cameraName) ?? ""

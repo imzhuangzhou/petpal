@@ -18,6 +18,7 @@ class CreatePetRequest(BaseModel):
     species: Literal["cat", "dog"] = "cat"
     photo_url: Optional[str] = ""
     avatar_url: Optional[str] = ""
+    uses_default_avatar: bool = False
     language_style: Optional[str] = "tsundere"
     style_prompt: Optional[str] = ""
     owner_alias: Optional[str] = ""
@@ -27,11 +28,42 @@ class CreatePetRequest(BaseModel):
     voice_sample_path: Optional[str] = ""
 
 
+class UpdatePetRequest(BaseModel):
+    name: str
+    species: Literal["cat", "dog"] = "cat"
+    photo_url: Optional[str] = ""
+    avatar_url: Optional[str] = ""
+    uses_default_avatar: bool = False
+    language_style: Optional[str] = "tsundere"
+    style_prompt: Optional[str] = ""
+    owner_alias: Optional[str] = ""
+
+
 class CreateCameraRequest(BaseModel):
     user_id: int
     name: Optional[str] = "客厅"
     stream_url: Optional[str] = ""
     is_demo: Optional[bool] = False
+
+
+def _validate_pet_avatar_payload(uses_default_avatar: bool, photo_url: Optional[str]):
+    if not uses_default_avatar and (not photo_url or not photo_url.strip()):
+        raise HTTPException(status_code=400, detail="请先上传宠物参考照片")
+
+
+def _serialize_pet_response(pet: dict):
+    return {
+        "id": pet["id"],
+        "name": pet["name"],
+        "species": pet["species"],
+        "photo_url": pet.get("photo_url", ""),
+        "avatar_url": pet.get("avatar_url", ""),
+        "owner_alias": pet.get("owner_alias", ""),
+        "language_style": pet.get("language_style", "tsundere"),
+        "voice_type": pet.get("voice_type", "preset"),
+        "voice_key": pet.get("voice_key", "cat-soft"),
+        "voice_label": pet.get("voice_label", "奶呼噜"),
+    }
 
 
 @router.post("/user")
@@ -53,8 +85,7 @@ def get_user(user_id: int):
 
 @router.post("/pet")
 def create_pet(req: CreatePetRequest):
-    if not req.photo_url or not req.photo_url.strip():
-        raise HTTPException(status_code=400, detail="请先上传宠物参考照片")
+    _validate_pet_avatar_payload(req.uses_default_avatar, req.photo_url)
 
     pet_id = execute_db(
         """INSERT INTO pets (
@@ -66,17 +97,21 @@ def create_pet(req: CreatePetRequest):
          req.photo_url, req.avatar_url, req.language_style, req.style_prompt,
          req.owner_alias, req.voice_type, req.voice_key, req.voice_label, req.voice_sample_path),
     )
-    return {
-        "id": pet_id,
-        "name": req.name,
-        "species": req.species,
-        "photo_url": req.photo_url,
-        "avatar_url": req.avatar_url,
-        "owner_alias": req.owner_alias,
-        "voice_type": req.voice_type,
-        "voice_key": req.voice_key,
-        "voice_label": req.voice_label,
-    }
+    pet = query_db("SELECT * FROM pets WHERE id = ?", (pet_id,), one=True)
+    if not pet:
+        pet = {
+            "id": pet_id,
+            "name": req.name,
+            "species": req.species,
+            "photo_url": req.photo_url,
+            "avatar_url": req.avatar_url,
+            "owner_alias": req.owner_alias,
+            "language_style": req.language_style,
+            "voice_type": req.voice_type,
+            "voice_key": req.voice_key,
+            "voice_label": req.voice_label,
+        }
+    return _serialize_pet_response(pet)
 
 
 @router.get("/pet/{pet_id}")
@@ -85,6 +120,35 @@ def get_pet(pet_id: int):
     if not pet:
         raise HTTPException(status_code=404, detail="Pet not found")
     return pet
+
+
+@router.patch("/pet/{pet_id}")
+def update_pet(pet_id: int, req: UpdatePetRequest):
+    existing_pet = query_db("SELECT * FROM pets WHERE id = ?", (pet_id,), one=True)
+    if not existing_pet:
+        raise HTTPException(status_code=404, detail="Pet not found")
+
+    _validate_pet_avatar_payload(req.uses_default_avatar, req.photo_url)
+
+    execute_db(
+        """UPDATE pets
+           SET name = ?, species = ?, photo_url = ?, avatar_url = ?,
+               language_style = ?, style_prompt = ?, owner_alias = ?
+           WHERE id = ?""",
+        (
+            req.name,
+            req.species,
+            req.photo_url or "",
+            req.avatar_url or "",
+            req.language_style or "tsundere",
+            req.style_prompt or "",
+            req.owner_alias or "",
+            pet_id,
+        ),
+    )
+
+    pet = query_db("SELECT * FROM pets WHERE id = ?", (pet_id,), one=True)
+    return _serialize_pet_response(pet)
 
 
 @router.get("/pets/{user_id}")

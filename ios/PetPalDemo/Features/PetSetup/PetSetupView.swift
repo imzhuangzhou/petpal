@@ -4,7 +4,9 @@ import UIKit
 
 struct PetSetupView: View {
     @EnvironmentObject private var appStore: AppStore
-    @State private var currentStep = 0
+    @FocusState private var focusedField: StepOneFocusableField?
+    @AccessibilityFocusState private var accessibilityFocusedField: StepOneFocusableField?
+    @State private var currentStep: Int
     @State private var petName = ""
     @State private var ownerAlias = ""
     @State private var species = "cat"
@@ -16,92 +18,120 @@ struct PetSetupView: View {
     @State private var referencePhotoRemotePath = ""
     @State private var generatedAvatarRemotePath = ""
     @State private var avatarGenerationState: AvatarGenerationState = .idle
+    @State private var avatarInputMode: AvatarInputMode = .photoGenerated
+    @State private var selectedCatDefaultAvatarID = "cat_american_shorthair"
+    @State private var selectedDogDefaultAvatarID = "dog_beagle"
     @State private var avatarMessage: String?
+    @State private var hasAttemptedStepOneSubmit = false
+    @State private var hasScrolledToBottom = false
+    @State private var scrollPosition: String?
+    @State private var hasRestoredDraft = false
+    private let initialStep: Int
     private let referencePhotoMaxDimension: CGFloat = 1600
     private let referencePhotoCompressionQuality: CGFloat = 0.85
 
-    private let speciesOptions = [
-        SpeciesOption(id: "cat", artAsset: .petCat, label: "喵星人", summary: "轻盈、敏感、会把心事藏在尾巴尖。"),
-        SpeciesOption(id: "dog", artAsset: .petDog, label: "汪星人", summary: "热情、黏人、会把开心都写在眼睛里。"),
-    ]
+    private let speciesOptions = petPalSpeciesOptions
+    private let styleOptions = petPalStyleOptions
+    private let defaultAvatarOptions = petPalDefaultAvatarOptions
 
-    private let styleOptions = [
-        StyleOption(id: "tsundere", artAsset: .styleTsundere, name: "傲娇主子", desc: "嘴上不说，心里却记得你什么时候回家。"),
-        StyleOption(id: "loyal", artAsset: .styleLoyal, name: "忠诚小跟班", desc: "每一句回应都像摇着尾巴朝你跑来。"),
-        StyleOption(id: "chatty", artAsset: .styleChatty, name: "碎碎念搭子", desc: "芝麻大的小事，也想马上讲给你听。"),
-        StyleOption(id: "chill", artAsset: .styleChill, name: "松弛感主角", desc: "不慌不忙，连撒娇都带着午后阳光味。"),
-    ]
+    init(initialStep: Int = 0) {
+        let clampedStep = min(max(initialStep, 0), 1)
+        self.initialStep = clampedStep
+        _currentStep = State(initialValue: clampedStep)
+    }
 
     var body: some View {
         PetPalShell {
-            GeometryReader { geometry in
-                let contentWidth = min(max(geometry.size.width - 40, 280), 520)
-                let isCompactLayout = contentWidth < 360
-                let viewportHeight = geometry.size.height
+            ScrollViewReader { scrollProxy in
+                GeometryReader { geometry in
+                    let contentWidth = min(max(geometry.size.width - 40, 280), 520)
+                    let isCompactLayout = contentWidth < 360
+                    let viewportHeight = geometry.size.height
 
-                ZStack {
-                    ScrollView(showsIndicators: false) {
-                        VStack(spacing: 16) {
-                            PetPalStepIndicator(total: 2, current: currentStep)
+                    ZStack {
+                        ScrollView(showsIndicators: false) {
+                            VStack(spacing: 16) {
+                                PetPalStepIndicator(total: 2, current: currentStep)
 
-                            if currentStep == 0 {
-                                stepOneIdentityCard()
-                            } else {
-                                PetPalHeroCard(
-                                    badge: "Pet setup",
-                                    stampAsset: selectedSpecies.artAsset,
-                                    stampImageURL: currentHeroImageURL,
-                                    title: heroTitle,
-                                    subtitle: heroSubtitle
-                                )
-                            }
-
-                            PetPalPanelCard {
-                                switch currentStep {
-                                case 0:
-                                    stepOneContent(
-                                        contentWidth: contentWidth,
-                                        isCompactLayout: isCompactLayout,
-                                        viewportHeight: viewportHeight
-                                    )
-                                default:
-                                    stepTwoContent(contentWidth: contentWidth, isCompactLayout: isCompactLayout)
+                                if currentStep == 0 {
+                                    stepOneIdentityCard()
                                 }
-                            }
 
-                            if let errorMessage {
-                                Text(errorMessage)
-                                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                                    .foregroundStyle(PetPalTheme.danger)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                PetPalPanelCard {
+                                    switch currentStep {
+                                    case 0:
+                                        stepOneContent(
+                                            contentWidth: contentWidth,
+                                            isCompactLayout: isCompactLayout,
+                                            viewportHeight: viewportHeight
+                                        )
+                                    default:
+                                        stepTwoContent(
+                                            contentWidth: contentWidth,
+                                            isCompactLayout: isCompactLayout,
+                                            scrollProxy: scrollProxy
+                                        )
+                                    }
+                                }
+
+                                if let errorMessage {
+                                    PetPalInlineFeedback(message: errorMessage, tone: .danger)
+                                }
+
+                                if !hasScrolledToBottom {
+                                    bottomActionBar(scrollProxy: scrollProxy)
+                                        .padding(.top, 8)
+                                }
+
+                                bottomAnchor
+                                    .id("bottomAnchor")
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 24)
+                        }
+                        .safeAreaPadding(.top, 12)
+                        .scrollBounceBehavior(.basedOnSize)
+                        .scrollPosition(id: $scrollPosition)
+                        .onChange(of: scrollPosition) { _, newValue in
+                            if newValue == "bottomAnchor" {
+                                hasScrolledToBottom = true
                             }
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 24)
-                    }
-                    .safeAreaPadding(.top, 12)
-                    .scrollBounceBehavior(.basedOnSize)
 
-                    if isSubmitting {
-                        PetPalLoadingOverlay(
-                            title: "正在建立宠物档案...",
-                            subtitle: "我们会保存参考照片和聊天人格，接着进入演示视频上传。"
-                        )
+                        if isSubmitting {
+                            PetPalLoadingOverlay(
+                                title: "正在建立宠物档案...",
+                                subtitle: "我们会保存参考照片和聊天人格，接着进入演示视频上传。"
+                            )
+                        }
+                    }
+                }
+                .safeAreaInset(edge: .bottom) {
+                    if hasScrolledToBottom {
+                        bottomActionBar(scrollProxy: scrollProxy)
+                    } else {
+                        Color.clear
+                            .frame(height: 1)
                     }
                 }
             }
-        }
-        .safeAreaInset(edge: .bottom) {
-            bottomActionBar
         }
         .onChange(of: selectedReferencePhotoItem) {
             Task {
                 await importReferencePhoto()
             }
         }
+        .onAppear {
+            restoreDraftIfNeeded()
+        }
         .onDisappear {
             cleanupReferencePhotoFile()
         }
+    }
+
+    private var bottomAnchor: some View {
+        Color.clear
+            .frame(height: 1)
     }
 
     private var selectedSpecies: SpeciesOption {
@@ -125,70 +155,136 @@ struct PetSetupView: View {
     }
 
     private var currentHeroImageURL: URL? {
-        generatedAvatarResolvedURL ?? referencePhotoResolvedURL
+        guard !isUsingDefaultAvatar else { return nil }
+        return generatedAvatarResolvedURL ?? referencePhotoResolvedURL
     }
 
-    private var heroTitle: String {
-        switch currentStep {
-        case 0:
-            return "先认识一下新伙伴"
-        default:
-            return "给它一点说话脾气"
+    private var currentHeroArtAsset: PetPalArtAsset {
+        isUsingDefaultAvatar ? selectedDefaultAvatarOption.artAsset : selectedSpecies.artAsset
+    }
+
+    private var isUsingDefaultAvatar: Bool {
+        avatarInputMode == .defaultArt
+    }
+
+    private var selectedDefaultAvatarID: String {
+        species == "dog" ? selectedDogDefaultAvatarID : selectedCatDefaultAvatarID
+    }
+
+    private var visibleDefaultAvatarOptions: [DefaultAvatarOption] {
+        defaultAvatarOptions.filter { $0.species == species }
+    }
+
+    private var selectedDefaultAvatarOption: DefaultAvatarOption {
+        visibleDefaultAvatarOptions.first(where: { $0.id == selectedDefaultAvatarID }) ?? visibleDefaultAvatarOptions[0]
+    }
+
+    private var currentPetSetupDraft: PetSetupDraft {
+        PetSetupDraft(
+            petName: petName,
+            ownerAlias: ownerAlias,
+            species: species,
+            style: style,
+            avatarInputMode: avatarInputMode,
+            selectedCatDefaultAvatarID: selectedCatDefaultAvatarID,
+            selectedDogDefaultAvatarID: selectedDogDefaultAvatarID,
+            referencePhotoRemotePath: referencePhotoRemotePath,
+            generatedAvatarRemotePath: generatedAvatarRemotePath,
+            avatarGenerationState: avatarGenerationState,
+            avatarMessage: avatarMessage,
+            defaultAvatarAssetName: selectedDefaultAvatarOption.artAsset.rawValue
+        )
+    }
+
+    private func selectDefaultAvatar(id: String) {
+        if species == "dog" {
+            selectedDogDefaultAvatarID = id
+        } else {
+            selectedCatDefaultAvatarID = id
         }
     }
 
-    private var heroSubtitle: String {
-        switch currentStep {
-        case 0:
-            return "上传照片、补上名字与种类，就能完成建档。"
-        default:
-            return "选一种聊天语气，让它更像你熟悉的样子。"
-        }
-    }
+    private func restoreDraftIfNeeded() {
+        guard !hasRestoredDraft else { return }
+        hasRestoredDraft = true
 
-    private var canContinueFromStepOne: Bool {
-        !trimmedPetName.isEmpty &&
-        !referencePhotoRemotePath.isEmpty &&
-        !generatedAvatarRemotePath.isEmpty &&
-        avatarGenerationState == .generated
+        guard let draft = appStore.petSetupDraft else {
+            currentStep = initialStep
+            return
+        }
+
+        petName = draft.petName
+        ownerAlias = draft.ownerAlias
+        species = draft.species
+        style = draft.style
+        avatarInputMode = draft.avatarInputMode
+        selectedCatDefaultAvatarID = draft.selectedCatDefaultAvatarID
+        selectedDogDefaultAvatarID = draft.selectedDogDefaultAvatarID
+        referencePhotoRemotePath = draft.referencePhotoRemotePath
+        generatedAvatarRemotePath = draft.generatedAvatarRemotePath
+        avatarGenerationState = draft.avatarGenerationState
+        avatarMessage = draft.avatarMessage
+        currentStep = initialStep
     }
 
     private var primaryButtonTitle: String {
         switch currentStep {
         case 0:
-            return "继续设置聊天人格"
+            return "下一步"
         default:
             return "完成建档"
         }
     }
 
     private var isPrimaryButtonDisabled: Bool {
-        if isSubmitting {
-            return true
-        }
-
-        if currentStep == 0 {
-            return !canContinueFromStepOne
-        }
-
-        return false
+        isSubmitting
     }
 
-    private var bottomActionBar: some View {
+    private var stepOneBlocker: StepOneBlocker? {
+        if trimmedPetName.isEmpty {
+            return .petNameMissing
+        }
+
+        if trimmedOwnerAlias.isEmpty {
+            return .ownerAliasMissing
+        }
+
+        if isUsingDefaultAvatar {
+            return nil
+        }
+
+        if avatarGenerationState == .generating {
+            return .avatarGenerating
+        }
+
+        if referencePhotoRemotePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .avatarPhotoMissing
+        }
+
+        if avatarGenerationState != .generated || generatedAvatarRemotePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .avatarGenerationFailed
+        }
+
+        return nil
+    }
+
+    private func bottomActionBar(scrollProxy: ScrollViewProxy) -> some View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
                 if currentStep > 0 {
                     Button("上一步") {
+                        let previousStep = max(currentStep - 1, 0)
                         withAnimation(.easeInOut(duration: 0.22)) {
-                            currentStep -= 1
+                            currentStep = previousStep
                         }
+                        appStore.onboardingRoute = .petSetup(step: previousStep)
                     }
                     .buttonStyle(PetPalSecondaryButtonStyle())
                     .frame(width: 118)
                 }
 
                 Button {
-                    handlePrimaryAction()
+                    handlePrimaryAction(scrollProxy: scrollProxy)
                 } label: {
                     Text(primaryButtonTitle)
                 }
@@ -219,29 +315,41 @@ struct PetSetupView: View {
                 .font(.system(size: 18, weight: .black, design: .rounded))
                 .foregroundStyle(PetPalTheme.ink)
 
-            Text("先填写基础信息，再上传照片生成头像。")
+            Text("先填写基础信息，再上传照片生成头像，或直接使用默认头像。")
                 .font(.system(size: 13, weight: .medium, design: .rounded))
                 .foregroundStyle(PetPalTheme.inkSoft)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("名字")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundStyle(PetPalTheme.inkSoft)
+                PetPalFieldLabel(title: "名字", required: true)
 
                 TextField("例如：发财、奶盖、奥利奥...", text: $petName)
-                    .petPalTextFieldStyle()
+                    .petPalTextFieldStyle(isInvalid: stepOneFieldError(for: .petName) != nil)
+                    .focused($focusedField, equals: .petName)
+                    .accessibilityFocused($accessibilityFocusedField, equals: .petName)
                     .accessibilityLabel("宠物名字输入框")
+                    .accessibilityHint("必填，给它起个名字")
+
+                if let message = stepOneFieldError(for: .petName) {
+                    PetPalInlineFeedback(message: message, tone: .warning)
+                }
             }
+            .id(StepOneScrollTarget.petName.rawValue)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("它怎么称呼你")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundStyle(PetPalTheme.inkSoft)
+                PetPalFieldLabel(title: "它怎么称呼你", required: true)
 
                 TextField("例如：boss、妈妈、小陈...", text: $ownerAlias)
-                    .petPalTextFieldStyle()
+                    .petPalTextFieldStyle(isInvalid: stepOneFieldError(for: .ownerAlias) != nil)
+                    .focused($focusedField, equals: .ownerAlias)
+                    .accessibilityFocused($accessibilityFocusedField, equals: .ownerAlias)
                     .accessibilityLabel("宠物主人称呼输入框")
+                    .accessibilityHint("必填，告诉它怎么称呼你")
+
+                if let message = stepOneFieldError(for: .ownerAlias) {
+                    PetPalInlineFeedback(message: message, tone: .warning)
+                }
             }
+            .id(StepOneScrollTarget.ownerAlias.rawValue)
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("宠物种类")
@@ -268,18 +376,27 @@ struct PetSetupView: View {
         isCompactLayout: Bool,
         viewportHeight: CGFloat
     ) -> some View {
-        stepOneArtworkCard(isCompactLayout: isCompactLayout, viewportHeight: viewportHeight)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("宠物头像")
+                .font(.system(size: 18, weight: .black, design: .rounded))
+                .foregroundStyle(PetPalTheme.ink)
+
+            stepOneArtworkCard(isCompactLayout: isCompactLayout, viewportHeight: viewportHeight)
+        }
     }
 
     @ViewBuilder
-    private func stepTwoContent(contentWidth: CGFloat, isCompactLayout: Bool) -> some View {
+    private func stepTwoContent(contentWidth: CGFloat, isCompactLayout: Bool, scrollProxy: ScrollViewProxy) -> some View {
         PetSetupStepHeader(
             eyebrow: "聊天人格",
             title: "它平时会怎么跟你说话？",
+            subtitle: "选一种聊天语气，让它更像你熟悉的样子。不改也可以直接完成建档。",
             chipText: "Step 2",
+            stampAsset: currentHeroArtAsset,
+            stampImageURL: currentHeroImageURL,
             onSkip: {
                 Task {
-                    await skipStyleStep()
+                    await skipStyleStep(scrollProxy: scrollProxy)
                 }
             }
         )
@@ -302,129 +419,209 @@ struct PetSetupView: View {
     }
 
     @ViewBuilder
-    private func stepOneArtworkCard(isCompactLayout: Bool, viewportHeight: CGFloat) -> some View {
-        let previewHeight = artworkPreviewHeight(isCompactLayout: isCompactLayout, viewportHeight: viewportHeight)
-
+    private func stepOneArtworkCard(isCompactLayout: Bool, viewportHeight _: CGFloat) -> some View {
         PetPalSurfaceCard {
-            Text("上传 1 张清晰照片，系统会生成头像。")
+            Text("上传照片生成专属头像，或直接使用默认头像。")
                 .font(.system(size: 14, weight: .bold, design: .rounded))
                 .foregroundStyle(PetPalTheme.ink)
 
-            switch avatarGenerationState {
-            case .idle:
-                PhotosPicker(
-                    selection: $selectedReferencePhotoItem,
-                    matching: .images,
-                    photoLibrary: .shared()
-                ) {
-                    PetSetupAvatarPlaceholder(
-                        title: "上传宠物照片",
-                        subtitle: "选择 1 张五官或特征清晰的照片。",
-                        height: previewHeight,
-                        accentAsset: selectedSpecies.artAsset
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint("打开系统照片选择器选择宠物参考照片")
-            case .generating:
-                PetSetupAvatarLoadingCard(height: previewHeight)
-            case .generated:
-                PetSetupArtworkPreview(
-                    remoteImageURL: generatedAvatarResolvedURL,
-                    fallbackAsset: selectedSpecies.artAsset,
-                    height: previewHeight
-                )
-            case .failed:
-                PetSetupAvatarPlaceholder(
-                    title: "这次没有成功生成卡通形象",
-                    subtitle: avatarMessage?.ifEmpty("你可以重试生成，也可以直接更换另一张参考照片。") ?? "你可以重试生成，也可以直接更换另一张参考照片。",
-                    height: previewHeight,
-                    accentAsset: .avatarPalette
-                )
-            }
+            avatarInputModeSelector()
 
-            if avatarGenerationState != .generating,
-               let avatarMessage,
-               !avatarMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            {
-                Text(avatarMessage)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundStyle(avatarGenerationState == .failed ? PetPalTheme.warning : PetPalTheme.inkSoft)
-                    .lineSpacing(3)
-            }
-
-            switch avatarGenerationState {
-            case .generated:
-                HStack(spacing: 10) {
-                    Button("重新生成") {
-                        Task {
-                            await retryAvatarGeneration()
-                        }
-                    }
-                    .buttonStyle(PetPalSecondaryButtonStyle())
-
-                    PhotosPicker(
-                        selection: $selectedReferencePhotoItem,
-                        matching: .images,
-                        photoLibrary: .shared()
-                    ) {
-                        Text("更换照片")
-                    }
-                    .buttonStyle(PetPalSecondaryButtonStyle())
-                }
-            case .failed:
-                if isCompactLayout {
-                    VStack(spacing: 10) {
-                        Button("重试生成") {
-                            Task {
-                                await retryAvatarGeneration()
-                            }
-                        }
-                        .buttonStyle(PetPalSecondaryButtonStyle())
-
-                        PhotosPicker(
-                            selection: $selectedReferencePhotoItem,
-                            matching: .images,
-                            photoLibrary: .shared()
-                        ) {
-                            Text("更换照片")
-                        }
-                        .buttonStyle(PetPalSecondaryButtonStyle())
-                    }
+            VStack(spacing: 14) {
+                if isUsingDefaultAvatar {
+                    defaultAvatarGrid()
                 } else {
-                    HStack(spacing: 10) {
-                        Button("重试生成") {
-                            Task {
-                                await retryAvatarGeneration()
-                            }
-                        }
-                        .buttonStyle(PetPalSecondaryButtonStyle())
-
+                    switch avatarGenerationState {
+                    case .idle:
                         PhotosPicker(
                             selection: $selectedReferencePhotoItem,
                             matching: .images,
                             photoLibrary: .shared()
                         ) {
-                            Text("更换照片")
+                            PetSetupAvatarPlaceholder(
+                                title: "上传宠物照片",
+                                subtitle: "选择 1 张五官或特征清晰的照片。",
+                                accentAsset: selectedSpecies.artAsset
+                            )
                         }
-                        .buttonStyle(PetPalSecondaryButtonStyle())
+                        .buttonStyle(.plain)
+                        .accessibilityHint("打开系统照片选择器选择宠物参考照片")
+                    case .generating:
+                        PetSetupAvatarLoadingCard()
+                    case .generated:
+                        PetSetupArtworkPreview(
+                            remoteImageURL: generatedAvatarResolvedURL,
+                            fallbackAsset: selectedSpecies.artAsset
+                        )
+                    case .failed:
+                        PetSetupAvatarPlaceholder(
+                            title: "这次没有成功生成卡通形象",
+                            subtitle: avatarMessage?.ifEmpty("你可以重试生成，也可以直接更换另一张参考照片。") ?? "你可以重试生成，也可以直接更换另一张参考照片。",
+                            accentAsset: .avatarPalette
+                        )
+                    }
+
+                    if avatarGenerationState != .generating,
+                       let avatarMessage,
+                       !avatarMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    {
+                        Text(avatarMessage)
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundStyle(avatarGenerationState == .failed ? PetPalTheme.warning : PetPalTheme.inkSoft)
+                            .lineSpacing(3)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                    }
+
+                    switch avatarGenerationState {
+                    case .generated:
+                        avatarActionButtons(isCompactLayout: isCompactLayout, retryTitle: "重新生成")
+                    case .failed:
+                        avatarActionButtons(isCompactLayout: isCompactLayout, retryTitle: "重试生成")
+                    default:
+                        EmptyView()
                     }
                 }
-            default:
-                EmptyView()
+
+                if let avatarValidationMessage {
+                    PetPalInlineFeedback(message: avatarValidationMessage, tone: .warning)
+                }
             }
         }
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(avatarBorderColor, lineWidth: 1.2)
         )
+        .id(StepOneScrollTarget.avatar.rawValue)
     }
 
-    private func artworkPreviewHeight(isCompactLayout: Bool, viewportHeight: CGFloat) -> CGFloat {
-        let minimumHeight = isCompactLayout ? 144.0 : 156.0
-        let preferredHeight = isCompactLayout ? 156.0 : 176.0
-        let scaledHeight = viewportHeight * (isCompactLayout ? 0.2 : 0.225)
-        return max(minimumHeight, min(preferredHeight, scaledHeight))
+    @ViewBuilder
+    private func avatarInputModeSelector() -> some View {
+        HStack(spacing: 10) {
+            avatarInputModeButton(
+                mode: .photoGenerated,
+                artAsset: .avatarPalette,
+                title: "照片生成"
+            )
+
+            avatarInputModeButton(
+                mode: .defaultArt,
+                artAsset: selectedDefaultAvatarOption.artAsset,
+                title: "默认头像"
+            )
+        }
+    }
+
+    private func avatarInputModeButton(
+        mode: AvatarInputMode,
+        artAsset: PetPalArtAsset,
+        title: String
+    ) -> some View {
+        Button {
+            errorMessage = nil
+            avatarInputMode = mode
+        } label: {
+            PetPalAvatarSurface(isSelected: avatarInputMode == mode, cornerRadius: 18) {
+                HStack(spacing: 10) {
+                    PetPalArtImage(asset: artAsset)
+                        .frame(width: 24, height: 24)
+
+                    Text(title)
+                        .font(.system(size: 14, weight: .black, design: .rounded))
+                        .foregroundStyle(PetPalTheme.ink)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 52)
+                .padding(.horizontal, 12)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func defaultAvatarGrid() -> some View {
+        LazyVGrid(
+            columns: [
+                GridItem(.flexible(), spacing: 10),
+                GridItem(.flexible(), spacing: 10),
+            ],
+            spacing: 10
+        ) {
+            ForEach(visibleDefaultAvatarOptions) { option in
+                Button {
+                    errorMessage = nil
+                    selectDefaultAvatar(id: option.id)
+                } label: {
+                    defaultAvatarTile(option: option, isSelected: option.id == selectedDefaultAvatarID)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func defaultAvatarTile(option: DefaultAvatarOption, isSelected: Bool) -> some View {
+        PetPalAvatarSurface(isSelected: isSelected, cornerRadius: 22) {
+            VStack(spacing: 10) {
+                ZStack {
+                    RadialGradient(
+                        colors: [PetPalTheme.avatarHalo.opacity(isSelected ? 0.42 : 0.26), .clear],
+                        center: .center,
+                        startRadius: 10,
+                        endRadius: 60
+                    )
+                    .frame(width: 96, height: 96)
+
+                    PetPalArtImage(asset: option.artAsset)
+                        .frame(width: 68, height: 68)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 100)
+
+                Text(option.title)
+                    .font(.system(size: 13, weight: .black, design: .rounded))
+                    .foregroundStyle(PetPalTheme.ink)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(12)
+        }
+    }
+
+    @ViewBuilder
+    private func avatarActionButtons(isCompactLayout: Bool, retryTitle: String) -> some View {
+        if isCompactLayout {
+            VStack(spacing: 10) {
+                avatarRetryButton(title: retryTitle)
+                avatarReplacePhotoButton
+            }
+        } else {
+            HStack(spacing: 10) {
+                avatarRetryButton(title: retryTitle)
+                avatarReplacePhotoButton
+            }
+        }
+    }
+
+    private func avatarRetryButton(title: String) -> some View {
+        Button(title) {
+            Task {
+                await retryAvatarGeneration()
+            }
+        }
+        .buttonStyle(PetPalSecondaryButtonStyle())
+    }
+
+    private var avatarReplacePhotoButton: some View {
+        PhotosPicker(
+            selection: $selectedReferencePhotoItem,
+            matching: .images,
+            photoLibrary: .shared()
+        ) {
+            Text("更换照片")
+        }
+        .buttonStyle(PetPalSecondaryButtonStyle())
     }
 
     private func optionColumns(for contentWidth: CGFloat) -> [GridItem] {
@@ -440,21 +637,20 @@ struct PetSetupView: View {
 
     @ViewBuilder
     private func compactSpeciesTile(option: SpeciesOption, isSelected: Bool) -> some View {
-        HStack(spacing: 10) {
-            PetPalArtImage(asset: option.artAsset)
-                .frame(width: 26, height: 26)
+        PetPalAvatarSurface(isSelected: isSelected, cornerRadius: 18) {
+            HStack(spacing: 10) {
+                PetPalArtImage(asset: option.artAsset)
+                    .frame(width: 26, height: 26)
 
-            Text(option.label)
-                .font(.system(size: 15, weight: .black, design: .rounded))
-                .foregroundStyle(PetPalTheme.ink)
-                .lineLimit(1)
+                Text(option.label)
+                    .font(.system(size: 15, weight: .black, design: .rounded))
+                    .foregroundStyle(PetPalTheme.ink)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 58)
+            .padding(.horizontal, 14)
         }
-        .frame(maxWidth: .infinity)
-        .frame(minHeight: 58)
-        .padding(.horizontal, 14)
-        .background(tileFill(isSelected: isSelected))
-        .overlay(tileBorder(isSelected: isSelected))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     @ViewBuilder
@@ -464,49 +660,54 @@ struct PetSetupView: View {
         subtitle: String,
         isSelected: Bool
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            PetPalArtImage(asset: artAsset)
-                .frame(width: 34, height: 34)
+        PetPalAvatarSurface(isSelected: isSelected, cornerRadius: 22) {
+            VStack(alignment: .leading, spacing: 8) {
+                PetPalArtImage(asset: artAsset)
+                    .frame(width: 34, height: 34)
 
-            Text(title)
-                .font(.system(size: 15, weight: .black, design: .rounded))
-                .foregroundStyle(PetPalTheme.ink)
+                Text(title)
+                    .font(.system(size: 15, weight: .black, design: .rounded))
+                    .foregroundStyle(PetPalTheme.ink)
 
-            Text(subtitle)
-                .font(.system(size: 13, weight: .medium, design: .rounded))
-                .foregroundStyle(PetPalTheme.inkSoft)
-                .multilineTextAlignment(.leading)
-                .lineSpacing(3)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(tileFill(isSelected: isSelected))
-        .overlay(tileBorder(isSelected: isSelected))
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-    }
-
-    @ViewBuilder
-    private func tileFill(isSelected: Bool) -> some View {
-        if isSelected {
-            LinearGradient(
-                colors: [Color(hex: "FFF8EF"), Color(hex: "FFF2E3")],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        } else {
-            Color(hex: "FFF9F1").opacity(0.95)
+                Text(subtitle)
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(PetPalTheme.inkSoft)
+                    .multilineTextAlignment(.leading)
+                    .lineSpacing(3)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
         }
     }
 
-    private func tileBorder(isSelected: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .stroke(
-                isSelected ? Color(hex: "EDA579") : PetPalTheme.line,
-                lineWidth: 1.5
-            )
+    private var avatarValidationMessage: String? {
+        guard hasAttemptedStepOneSubmit, currentStep == 0, stepOneBlocker?.isAvatarRelated == true else {
+            return nil
+        }
+
+        return stepOneBlocker?.inlineMessage
+    }
+
+    private func stepOneFieldError(for field: StepOneFocusableField) -> String? {
+        guard hasAttemptedStepOneSubmit, currentStep == 0 else { return nil }
+
+        switch field {
+        case .petName:
+            return trimmedPetName.isEmpty ? "给它起个名字吧，这样才能继续设置聊天人格。" : nil
+        case .ownerAlias:
+            return trimmedOwnerAlias.isEmpty ? "告诉它怎么称呼你，聊天时会更像你们平时说话。" : nil
+        }
     }
 
     private var avatarBorderColor: Color {
+        if avatarValidationMessage != nil {
+            return PetPalTheme.danger.opacity(0.75)
+        }
+
+        if isUsingDefaultAvatar {
+            return Color(hex: "EDA579")
+        }
+
         switch avatarGenerationState {
         case .failed:
             return Color(hex: "E4C18A")
@@ -519,44 +720,79 @@ struct PetSetupView: View {
         }
     }
 
-    private func handlePrimaryAction() {
+    private func handlePrimaryAction(scrollProxy: ScrollViewProxy) {
         errorMessage = nil
 
         switch currentStep {
         case 0:
-            advanceFromStepOne()
+            advanceFromStepOne(scrollProxy: scrollProxy)
         default:
             Task {
-                await createPet()
+                await createPet(scrollProxy: scrollProxy)
             }
         }
     }
 
-    private func skipStyleStep() async {
+    private func skipStyleStep(scrollProxy: ScrollViewProxy) async {
         style = "tsundere"
-        await createPet()
+        await createPet(scrollProxy: scrollProxy)
     }
 
-    private func advanceFromStepOne() {
+    private func persistDraftAndNavigateToCamera() {
+        let draft = currentPetSetupDraft
+        appStore.applyPetSetupDraft(draft)
+        appStore.applyPetSetupDraftToSession(draft)
+        appStore.onboardingRoute = .cameraSetup
+    }
+
+    private func advanceFromStepOne(scrollProxy: ScrollViewProxy) {
         errorMessage = nil
+        hasAttemptedStepOneSubmit = true
 
-        if trimmedPetName.isEmpty {
-            errorMessage = "请先填写宠物名字。"
+        if let blocker = stepOneBlocker {
+            presentStepOneBlocker(blocker, scrollProxy: scrollProxy)
             return
         }
 
-        if referencePhotoRemotePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            errorMessage = "请先上传目标宠物参考照片。"
-            return
-        }
-
-        if avatarGenerationState != .generated || generatedAvatarRemotePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            errorMessage = "请先生成卡通形象。"
-            return
-        }
-
+        focusedField = nil
         withAnimation(.easeInOut(duration: 0.22)) {
             currentStep = 1
+        }
+        appStore.onboardingRoute = .petSetup(step: 1)
+    }
+
+    private func presentStepOneBlocker(_ blocker: StepOneBlocker, scrollProxy: ScrollViewProxy) {
+        PetPalHaptics.warning()
+
+        withAnimation(.easeInOut(duration: 0.22)) {
+            scrollProxy.scrollTo(blocker.scrollTarget.rawValue, anchor: .center)
+        }
+
+        guard let focusField = blocker.focusField else {
+            focusedField = nil
+            accessibilityFocusedField = nil
+            return
+        }
+
+        focusedField = focusField
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(160))
+            accessibilityFocusedField = focusField
+        }
+    }
+
+    private func returnToStepOne(with blocker: StepOneBlocker, scrollProxy: ScrollViewProxy) {
+        hasAttemptedStepOneSubmit = true
+
+        withAnimation(.easeInOut(duration: 0.22)) {
+            currentStep = 0
+        }
+        appStore.onboardingRoute = .petSetup(step: 0)
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(260))
+            presentStepOneBlocker(blocker, scrollProxy: scrollProxy)
         }
     }
 
@@ -586,6 +822,7 @@ struct PetSetupView: View {
 
             let copiedURL = try persistSelectedReferencePhoto(data: photoData)
             cleanupReferencePhotoFile()
+            avatarInputMode = .photoGenerated
             referencePhotoLocalURL = copiedURL
             referencePhotoRemotePath = ""
             generatedAvatarRemotePath = ""
@@ -673,24 +910,17 @@ struct PetSetupView: View {
         self.referencePhotoLocalURL = nil
     }
 
-    private func createPet() async {
+    private func createPet(scrollProxy: ScrollViewProxy) async {
         guard let userID = appStore.session.userId else { return }
 
-        if trimmedPetName.isEmpty {
-            errorMessage = "请先填写宠物名字。"
-            currentStep = 0
+        if let blocker = stepOneBlocker {
+            returnToStepOne(with: blocker, scrollProxy: scrollProxy)
             return
         }
 
-        if referencePhotoRemotePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            errorMessage = "请先上传目标宠物参考照片。"
-            currentStep = 0
-            return
-        }
-
-        if avatarGenerationState != .generated || generatedAvatarRemotePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            errorMessage = "请先生成卡通形象。"
-            currentStep = 0
+        if appStore.session.petId != nil {
+            errorMessage = nil
+            persistDraftAndNavigateToCamera()
             return
         }
 
@@ -702,8 +932,9 @@ struct PetSetupView: View {
                 userID: userID,
                 name: trimmedPetName,
                 species: species,
-                photoURL: referencePhotoRemotePath,
-                avatarURL: generatedAvatarRemotePath,
+                photoURL: isUsingDefaultAvatar ? "" : referencePhotoRemotePath,
+                avatarURL: isUsingDefaultAvatar ? "" : generatedAvatarRemotePath,
+                usesDefaultAvatar: isUsingDefaultAvatar,
                 languageStyle: style,
                 ownerAlias: trimmedOwnerAlias
             )
@@ -715,8 +946,10 @@ struct PetSetupView: View {
                 name: trimmedPetName,
                 species: species,
                 style: style,
-                ownerAlias: trimmedOwnerAlias
+                ownerAlias: trimmedOwnerAlias,
+                defaultAvatarAssetName: isUsingDefaultAvatar ? selectedDefaultAvatarOption.artAsset.rawValue : ""
             )
+            persistDraftAndNavigateToCamera()
         } catch {
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
@@ -728,28 +961,67 @@ struct PetSetupView: View {
 private struct PetSetupStepHeader: View {
     let eyebrow: String
     let title: String
-    let chipText: String
+    let subtitle: String?
+    let chipText: String?
+    let stampAsset: PetPalArtAsset?
+    let stampImageURL: URL?
     var onSkip: (() -> Void)? = nil
+
+    init(
+        eyebrow: String,
+        title: String,
+        subtitle: String? = nil,
+        chipText: String? = nil,
+        stampAsset: PetPalArtAsset? = nil,
+        stampImageURL: URL? = nil,
+        onSkip: (() -> Void)? = nil
+    ) {
+        self.eyebrow = eyebrow
+        self.title = title
+        self.subtitle = subtitle
+        self.chipText = chipText
+        self.stampAsset = stampAsset
+        self.stampImageURL = stampImageURL
+        self.onSkip = onSkip
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(eyebrow)
-                    .font(.system(size: 12, weight: .black, design: .rounded))
-                    .foregroundStyle(PetPalTheme.caramel)
-                    .textCase(.uppercase)
-                    .tracking(1.2)
+            HStack(alignment: .center, spacing: 14) {
+                if let stampAsset {
+                    PetPalStamp(fallbackAsset: stampAsset, imageURL: stampImageURL)
+                }
 
-                Text(title)
-                    .font(.system(size: 18, weight: .black, design: .rounded))
-                    .foregroundStyle(PetPalTheme.ink)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(eyebrow)
+                        .font(.system(size: 12, weight: .black, design: .rounded))
+                        .foregroundStyle(PetPalTheme.caramel)
+                        .textCase(.uppercase)
+                        .tracking(1.2)
+
+                    Text(title)
+                        .font(.system(size: 18, weight: .black, design: .rounded))
+                        .foregroundStyle(PetPalTheme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundStyle(PetPalTheme.inkSoft)
+                            .lineSpacing(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
 
             Spacer(minLength: 8)
 
             VStack(alignment: .trailing, spacing: 8) {
-                PetPalCapsuleLabel(text: chipText, style: .sticker)
+                if let chipText {
+                    PetPalCapsuleLabel(text: chipText, style: .sticker)
+                }
 
                 if let onSkip {
                     Button("跳过") {
@@ -762,7 +1034,7 @@ private struct PetSetupStepHeader: View {
     }
 }
 
-private struct PetSetupImageCard: View {
+struct PetSetupImageCard: View {
     let title: String
     let subtitle: String
     let badgeText: String
@@ -856,72 +1128,61 @@ private struct PetSetupImageCard: View {
     }
 }
 
-private struct PetSetupAvatarPlaceholder: View {
+struct PetSetupAvatarPlaceholder: View {
     let title: String
     let subtitle: String
-    let height: CGFloat
     let accentAsset: PetPalArtAsset
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 24, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [Color(hex: "FFF4E9"), Color(hex: "FFE9D8")],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .frame(height: height)
-            .overlay {
-                VStack(spacing: 14) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.white.opacity(0.45))
-                            .frame(width: 72, height: 72)
+        PetPalAvatarSurface(cornerRadius: 24) {
+            VStack(spacing: 14) {
+                ZStack {
+                    RadialGradient(
+                        colors: [PetPalTheme.avatarHalo.opacity(0.44), .clear],
+                        center: .center,
+                        startRadius: 8,
+                        endRadius: 70
+                    )
+                    .frame(width: 92, height: 92)
 
-                        PetPalArtImage(asset: accentAsset)
-                            .frame(width: 40, height: 40)
-                    }
+                    PetPalArtImage(asset: accentAsset)
+                        .frame(width: 48, height: 48)
+                }
 
-                    VStack(spacing: 8) {
-                        Text(title)
-                            .font(.system(size: 15, weight: .black, design: .rounded))
-                            .foregroundStyle(PetPalTheme.ink)
-                            .multilineTextAlignment(.center)
+                VStack(spacing: 8) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .black, design: .rounded))
+                        .foregroundStyle(PetPalTheme.ink)
+                        .multilineTextAlignment(.center)
 
-                        Text(subtitle)
-                            .font(.system(size: 13, weight: .medium, design: .rounded))
-                            .foregroundStyle(PetPalTheme.inkSoft)
-                            .multilineTextAlignment(.center)
-                            .lineSpacing(3)
-                            .padding(.horizontal, 24)
-                    }
+                    Text(subtitle)
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(PetPalTheme.inkSoft)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                        .padding(.horizontal, 24)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(24)
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(1, contentMode: .fit)
     }
 }
 
-private struct PetSetupArtworkPreview: View {
+struct PetSetupArtworkPreview: View {
     let remoteImageURL: URL?
     let fallbackAsset: PetPalArtAsset
-    let height: CGFloat
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 24, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [Color(hex: "FFF6EC"), Color(hex: "FFEBDD")],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .frame(maxWidth: .infinity)
-            .frame(height: height)
-            .overlay {
-                content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        PetPalAvatarSurface(cornerRadius: 24) {
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(24)
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(1, contentMode: .fit)
     }
 
     @ViewBuilder
@@ -932,9 +1193,7 @@ private struct PetSetupArtworkPreview: View {
                 case .success(let image):
                     image
                         .resizable()
-                        .scaledToFill()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
+                        .scaledToFit()
                 case .empty, .failure:
                     placeholder
                 @unknown default:
@@ -947,84 +1206,190 @@ private struct PetSetupArtworkPreview: View {
     }
 
     private var placeholder: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color(hex: "FFF3E5"), Color(hex: "FFE2CC")],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+        VStack(spacing: 10) {
+            RadialGradient(
+                colors: [PetPalTheme.avatarHalo.opacity(0.42), .clear],
+                center: .center,
+                startRadius: 8,
+                endRadius: 64
             )
-
-            VStack(spacing: 8) {
+            .frame(width: 88, height: 88)
+            .overlay {
                 PetPalArtImage(asset: fallbackAsset)
-                    .frame(width: 48, height: 48)
-
-                Text("等待图片")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundStyle(PetPalTheme.inkSoft)
+                    .frame(width: 52, height: 52)
             }
+
+            Text("等待图片")
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(PetPalTheme.inkSoft)
         }
     }
 }
 
-private struct PetSetupAvatarLoadingCard: View {
-    let height: CGFloat
-
+struct PetSetupAvatarLoadingCard: View {
     var body: some View {
-        RoundedRectangle(cornerRadius: 24, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [Color(hex: "FFF4EA"), Color(hex: "FFEBDD")],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .frame(height: height)
-            .overlay {
-                VStack(spacing: 14) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.white.opacity(0.45))
-                            .frame(width: 72, height: 72)
+        PetPalAvatarSurface(cornerRadius: 24) {
+            VStack(spacing: 14) {
+                ZStack {
+                    RadialGradient(
+                        colors: [PetPalTheme.avatarHalo.opacity(0.46), .clear],
+                        center: .center,
+                        startRadius: 8,
+                        endRadius: 70
+                    )
+                    .frame(width: 92, height: 92)
 
-                        ProgressView()
-                            .controlSize(.large)
-                            .tint(Color(hex: "EF986A"))
-                    }
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(Color(hex: "EF986A"))
+                }
 
-                    VStack(spacing: 8) {
-                        Text("正在生成头像")
-                            .font(.system(size: 16, weight: .black, design: .rounded))
-                            .foregroundStyle(PetPalTheme.ink)
+                VStack(spacing: 8) {
+                    Text("正在生成头像")
+                        .font(.system(size: 16, weight: .black, design: .rounded))
+                        .foregroundStyle(PetPalTheme.ink)
 
-                        Text("请稍等片刻，完成后可以更换照片或继续下一步。")
-                            .font(.system(size: 13, weight: .medium, design: .rounded))
-                            .foregroundStyle(PetPalTheme.inkSoft)
-                            .multilineTextAlignment(.center)
-                            .lineSpacing(3)
-                            .padding(.horizontal, 24)
-                    }
+                    Text("请稍等片刻，完成后可以更换照片或继续下一步。")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(PetPalTheme.inkSoft)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                        .padding(.horizontal, 24)
                 }
             }
+            .frame(maxWidth: .infinity)
+            .aspectRatio(1, contentMode: .fit)
+            .padding(24)
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(1, contentMode: .fit)
     }
 }
 
-private enum AvatarGenerationState: Equatable {
-    case idle
-    case generating
-    case generated
-    case failed
+private enum StepOneFocusableField: Hashable {
+    case petName
+    case ownerAlias
 }
 
-private struct SpeciesOption: Identifiable {
+private enum StepOneScrollTarget: String {
+    case petName
+    case ownerAlias
+    case avatar
+}
+
+private enum StepOneBlocker: Equatable {
+    case petNameMissing
+    case ownerAliasMissing
+    case avatarPhotoMissing
+    case avatarGenerating
+    case avatarGenerationFailed
+
+    var scrollTarget: StepOneScrollTarget {
+        switch self {
+        case .petNameMissing:
+            return .petName
+        case .ownerAliasMissing:
+            return .ownerAlias
+        case .avatarPhotoMissing, .avatarGenerating, .avatarGenerationFailed:
+            return .avatar
+        }
+    }
+
+    var focusField: StepOneFocusableField? {
+        switch self {
+        case .petNameMissing:
+            return .petName
+        case .ownerAliasMissing:
+            return .ownerAlias
+        case .avatarPhotoMissing, .avatarGenerating, .avatarGenerationFailed:
+            return nil
+        }
+    }
+
+    var isAvatarRelated: Bool {
+        switch self {
+        case .avatarPhotoMissing, .avatarGenerating, .avatarGenerationFailed:
+            return true
+        case .petNameMissing, .ownerAliasMissing:
+            return false
+        }
+    }
+
+    var inlineMessage: String {
+        switch self {
+        case .petNameMissing:
+            return "给它起个名字吧，这样才能继续设置聊天人格。"
+        case .ownerAliasMissing:
+            return "告诉它怎么称呼你，聊天时会更像你们平时说话。"
+        case .avatarPhotoMissing:
+            return "先选一张它的照片，我们会据此生成专属头像。"
+        case .avatarGenerating:
+            return "头像还在生成中，生成完成后就能继续下一步。"
+        case .avatarGenerationFailed:
+            return "头像这次还没准备好，换张照片或重新生成后就能继续。"
+        }
+    }
+
+}
+struct SpeciesOption: Identifiable {
     let id: String
     let artAsset: PetPalArtAsset
     let label: String
     let summary: String
 }
 
-private struct StyleOption: Identifiable {
+struct StyleOption: Identifiable {
     let id: String
     let artAsset: PetPalArtAsset
     let name: String
     let desc: String
+}
+
+struct DefaultAvatarOption: Identifiable {
+    let id: String
+    let species: String
+    let artAsset: PetPalArtAsset
+    let title: String
+}
+
+let petPalSpeciesOptions = [
+    SpeciesOption(id: "cat", artAsset: .petCat, label: "喵星人", summary: "轻盈、敏感、会把心事藏在尾巴尖。"),
+    SpeciesOption(id: "dog", artAsset: .petDog, label: "汪星人", summary: "热情、黏人、会把开心都写在眼睛里。"),
+]
+
+let petPalStyleOptions = [
+    StyleOption(id: "tsundere", artAsset: .styleTsundere, name: "傲娇主子", desc: "嘴上不说，心里却记得你什么时候回家。"),
+    StyleOption(id: "loyal", artAsset: .styleLoyal, name: "忠诚小跟班", desc: "每一句回应都像摇着尾巴朝你跑来。"),
+    StyleOption(id: "chatty", artAsset: .styleChatty, name: "碎碎念搭子", desc: "芝麻大的小事，也想马上讲给你听。"),
+    StyleOption(id: "chill", artAsset: .styleChill, name: "松弛感主角", desc: "不慌不忙，连撒娇都带着午后阳光味。"),
+]
+
+let petPalDefaultAvatarOptions = [
+    DefaultAvatarOption(id: "cat_american_shorthair", species: "cat", artAsset: .petCat, title: "美短"),
+    DefaultAvatarOption(id: "cat_british_shorthair", species: "cat", artAsset: .petCatBritish, title: "英短"),
+    DefaultAvatarOption(id: "cat_siamese", species: "cat", artAsset: .petCatSiamese, title: "暹罗"),
+    DefaultAvatarOption(id: "cat_ragdoll", species: "cat", artAsset: .petCatRagdoll, title: "布偶"),
+    DefaultAvatarOption(id: "dog_beagle", species: "dog", artAsset: .petDog, title: "比格"),
+    DefaultAvatarOption(id: "dog_corgi", species: "dog", artAsset: .petDogCorgi, title: "柯基"),
+    DefaultAvatarOption(id: "dog_golden", species: "dog", artAsset: .petDogGolden, title: "金毛"),
+    DefaultAvatarOption(id: "dog_shiba", species: "dog", artAsset: .petDogShiba, title: "柴犬"),
+]
+
+func petPalSpeciesName(for speciesID: String) -> String {
+    speciesID == "dog" ? "狗狗" : "猫咪"
+}
+
+func petPalStyleName(for styleID: String) -> String {
+    petPalStyleOptions.first(where: { $0.id == styleID })?.name ?? "傲娇主子"
+}
+
+func petPalDefaultAvatarID(for assetName: String, species: String) -> String {
+    if let matched = petPalDefaultAvatarOptions.first(where: {
+        $0.species == species && $0.artAsset.rawValue == assetName
+    }) {
+        return matched.id
+    }
+
+    return petPalDefaultAvatarOptions.first(where: { $0.species == species })?.id
+        ?? (species == "dog" ? "dog_beagle" : "cat_american_shorthair")
 }

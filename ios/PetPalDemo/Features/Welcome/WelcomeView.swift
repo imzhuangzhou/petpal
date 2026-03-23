@@ -4,86 +4,74 @@ struct WelcomeView: View {
     @EnvironmentObject private var appStore: AppStore
     @State private var isSubmitting = false
     @State private var errorMessage: String?
-    private let onboardingSteps = ["添加爱宠", "连接摄像头", "开始聊天"]
+    @ScaledMetric(relativeTo: .title2) private var heroTopSpacing = 30.0
+    @ScaledMetric(relativeTo: .body) private var contentSpacing = 26.0
+    @ScaledMetric(relativeTo: .body) private var contentHorizontalPadding = 20.0
+
+    private let onboardingSteps = [
+        WelcomeStep(
+            index: "01",
+            symbolName: "heart.text.square.fill",
+            title: "添加爱宠",
+            subtitle: "创建它的专属档案"
+        ),
+        WelcomeStep(
+            index: "02",
+            symbolName: "video.fill",
+            title: "连接摄像头",
+            subtitle: "开始识别它的日常状态"
+        ),
+        WelcomeStep(
+            index: "03",
+            symbolName: "message.fill",
+            title: "开始聊天",
+            subtitle: "收到更像它亲口说的话"
+        ),
+    ]
 
     var body: some View {
-        PetPalShell(alignment: .center) {
-            VStack(spacing: 0) {
-                Spacer(minLength: 24)
+        PetPalShell {
+            GeometryReader { geometry in
+                let contentWidth = min(max(geometry.size.width - 40, 280), 520)
+                let isCompactHeight = geometry.size.height < 760
 
-                VStack(spacing: 0) {
-                    welcomeMark
-                        .padding(.bottom, 10)
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: contentSpacing) {
+                        Spacer(minLength: isCompactHeight ? 8 : 18)
 
-                    Text("PetPal")
-                        .font(.system(size: 40, weight: .black, design: .rounded))
-                        .foregroundStyle(PetPalTheme.ink)
+                        WelcomeHero(compactLayout: isCompactHeight)
 
-                    Text("每一帧，都是它想对你说的话")
-                        .font(.system(size: 15, weight: .medium, design: .rounded))
-                        .foregroundStyle(PetPalTheme.inkSoft)
-                        .padding(.top, 8)
-                        .padding(.bottom, 22)
+                        WelcomeStepsSection(
+                            steps: onboardingSteps,
+                            useVerticalLayout: contentWidth < 390
+                        )
 
-                    stepsSection
-                        .padding(.bottom, 18)
-
-                    Button {
-                        Task {
-                            await startOnboarding()
-                        }
-                    } label: {
-                        Group {
-                            if isSubmitting {
-                                ProgressView()
-                                    .tint(.white)
-                            } else {
-                                Text("开始创建宠物")
-                            }
-                        }
+                        Spacer(minLength: isCompactHeight ? 8 : 20)
                     }
-                    .buttonStyle(PetPalPrimaryButtonStyle())
-                    .disabled(isSubmitting)
-                    .accessibilityHint("进入宠物创建页")
-                    .frame(maxWidth: 360)
-
-                    if let errorMessage {
-                        Text(errorMessage)
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundStyle(PetPalTheme.danger)
-                            .padding(.top, 16)
-                            .multilineTextAlignment(.center)
-                    }
+                    .frame(maxWidth: contentWidth)
+                    .padding(.horizontal, contentHorizontalPadding)
+                    .padding(.top, heroTopSpacing)
+                    .padding(.bottom, isCompactHeight ? 120 : 136)
+                    .frame(maxWidth: .infinity)
+                    .frame(
+                        minHeight: max(geometry.size.height - (isCompactHeight ? 96 : 112), 0),
+                        alignment: .top
+                    )
                 }
-                .padding(.horizontal, 24)
-
-                Spacer(minLength: 24)
+                .scrollBounceBehavior(.basedOnSize)
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            WelcomeBottomCTA(
+                isSubmitting: isSubmitting,
+                errorMessage: errorMessage
+            ) {
+                Task {
+                    await startOnboarding()
+                }
             }
         }
     }
-
-    // MARK: - Pieces
-
-    private var welcomeMark: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [Color(hex: "FFF6EC"), Color(hex: "FFE8D0")],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(width: 116, height: 116)
-                .shadow(color: Color(hex: "EFB082").opacity(0.2), radius: 18, y: 10)
-
-            Image(systemName: "pawprint.fill")
-                .font(.system(size: 54, weight: .black))
-                .foregroundStyle(PetPalTheme.inkGradient)
-        }
-    }
-
-    // MARK: - Action
 
     private func startOnboarding() async {
         guard !isSubmitting else { return }
@@ -98,35 +86,6 @@ struct WelcomeView: View {
         } catch {
             errorMessage = onboardingErrorMessage(for: error)
         }
-    }
-
-    private var stepsSection: some View {
-        HStack(spacing: 10) {
-            ForEach(Array(onboardingSteps.enumerated()), id: \.offset) { index, title in
-                if index > 0 {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .black))
-                        .foregroundStyle(PetPalTheme.inkSoft.opacity(0.7))
-                }
-
-                Text(title)
-                    .font(.system(size: 13, weight: .black, design: .rounded))
-                    .foregroundStyle(PetPalTheme.ink)
-                    .lineLimit(1)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(0.88))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(PetPalTheme.line.opacity(0.8), lineWidth: 1)
-        )
-        .frame(maxWidth: 360)
     }
 
     private func onboardingErrorMessage(for error: Error) -> String {
@@ -157,4 +116,255 @@ struct WelcomeView: View {
 
         return error.localizedDescription
     }
+}
+
+private struct WelcomeHero: View {
+    let compactLayout: Bool
+
+    @ScaledMetric(relativeTo: .title) private var markSize = 110.0
+    @ScaledMetric(relativeTo: .largeTitle) private var glowSize = 188.0
+    @ScaledMetric(relativeTo: .title2) private var pawSize = 46.0
+
+    var body: some View {
+        VStack(spacing: compactLayout ? 18 : 22) {
+            PetPalCapsuleLabel(text: "与爱宠开始第一段对话", style: .soft)
+
+            ZStack {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                Color(hex: "FFE8D7").opacity(0.9),
+                                Color(hex: "FFF8EF").opacity(0.0),
+                            ],
+                            center: .center,
+                            startRadius: 12,
+                            endRadius: glowSize / 2
+                        )
+                    )
+                    .frame(width: glowSize, height: glowSize)
+                    .accessibilityHidden(true)
+
+                RoundedRectangle(cornerRadius: 36, style: .continuous)
+                    .fill(Color.white.opacity(0.46))
+                    .frame(width: markSize + 16, height: markSize + 16)
+                    .rotationEffect(.degrees(-8))
+                    .offset(x: -10, y: 6)
+                    .shadow(color: PetPalTheme.caramel.opacity(0.06), radius: 22, y: 10)
+                    .accessibilityHidden(true)
+
+                RoundedRectangle(cornerRadius: 34, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(hex: "FFF7ED"), Color(hex: "FFEAD8")],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: markSize, height: markSize)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 34, style: .continuous)
+                            .stroke(Color.white.opacity(0.72), lineWidth: 1)
+                    )
+                    .shadow(color: Color(hex: "EFB082").opacity(0.18), radius: 24, y: 12)
+
+                Image(systemName: "pawprint.fill")
+                    .font(.system(size: pawSize, weight: .black))
+                    .foregroundStyle(PetPalTheme.inkGradient)
+                    .accessibilityHidden(true)
+            }
+            .padding(.vertical, compactLayout ? 2 : 8)
+
+            VStack(spacing: compactLayout ? 8 : 12) {
+                Text("PetPal")
+                    .font(.system(size: compactLayout ? 42 : 46, weight: .black, design: .rounded))
+                    .foregroundStyle(PetPalTheme.ink)
+                    .multilineTextAlignment(.center)
+
+                Text("每一帧，都是它想对你说的话。\n用更自然的方式记录、理解，再开始聊天。")
+                    .font(.system(size: 16, weight: .medium, design: .rounded))
+                    .foregroundStyle(PetPalTheme.inkSoft)
+                    .lineSpacing(4)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 320)
+            }
+            .accessibilityElement(children: .combine)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct WelcomeStepsSection: View {
+    let steps: [WelcomeStep]
+    let useVerticalLayout: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("三步开始")
+                    .font(.system(size: 13, weight: .black, design: .rounded))
+                    .foregroundStyle(PetPalTheme.caramel)
+                    .textCase(.uppercase)
+                    .tracking(1.1)
+
+                Text("几分钟完成初始设置，很快就能收到它专属的回应。")
+                    .font(.system(size: 18, weight: .black, design: .rounded))
+                    .foregroundStyle(PetPalTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Group {
+                if useVerticalLayout {
+                    VStack(spacing: 12) {
+                        ForEach(steps) { step in
+                            WelcomeStepCard(step: step)
+                        }
+                    }
+                } else {
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(steps) { step in
+                            WelcomeStepCard(step: step)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .fill(Color.white.opacity(0.72))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .stroke(PetPalTheme.line.opacity(0.85), lineWidth: 1)
+        )
+        .shadow(color: PetPalTheme.caramel.opacity(0.08), radius: 20, y: 10)
+    }
+}
+
+private struct WelcomeStepCard: View {
+    let step: WelcomeStep
+
+    @ScaledMetric(relativeTo: .body) private var symbolBadgeSize = 34.0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 10) {
+                Text(step.index)
+                    .font(.system(size: 12, weight: .black, design: .rounded))
+                    .foregroundStyle(PetPalTheme.caramel)
+                    .frame(minWidth: 32, minHeight: 28)
+                    .padding(.horizontal, 8)
+                    .background(
+                        Capsule()
+                            .fill(Color(hex: "FFF0DE"))
+                    )
+
+                Spacer(minLength: 0)
+
+                Image(systemName: step.symbolName)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(PetPalTheme.caramel)
+                    .frame(width: symbolBadgeSize, height: symbolBadgeSize)
+                    .background(
+                        Circle()
+                            .fill(Color.white.opacity(0.78))
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(PetPalTheme.line.opacity(0.65), lineWidth: 1)
+                    )
+                    .accessibilityHidden(true)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(step.title)
+                    .font(.system(size: 15, weight: .black, design: .rounded))
+                    .foregroundStyle(PetPalTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(step.subtitle)
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(PetPalTheme.inkSoft)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(hex: "FFF9F1").opacity(0.96))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(PetPalTheme.line.opacity(0.75), lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct WelcomeBottomCTA: View {
+    let isSubmitting: Bool
+    let errorMessage: String?
+    let action: () -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("约 30 秒完成初始设置")
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(PetPalTheme.inkSoft)
+                .multilineTextAlignment(.center)
+
+            if let errorMessage {
+                PetPalInlineFeedback(message: errorMessage, tone: .danger)
+            }
+
+            Button(action: action) {
+                Group {
+                    if isSubmitting {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Text("开始创建宠物")
+                    }
+                }
+            }
+            .buttonStyle(PetPalPrimaryButtonStyle())
+            .disabled(isSubmitting)
+            .accessibilityHint("进入宠物创建页")
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        .frame(maxWidth: 520)
+        .frame(maxWidth: .infinity)
+        .background(
+            ZStack(alignment: .top) {
+                LinearGradient(
+                    colors: [
+                        PetPalTheme.cream0.opacity(0.0),
+                        PetPalTheme.cream0.opacity(0.92),
+                        PetPalTheme.cream0,
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+
+                Rectangle()
+                    .fill(PetPalTheme.line.opacity(0.45))
+                    .frame(height: 1)
+            }
+        )
+    }
+}
+
+private struct WelcomeStep: Identifiable {
+    let index: String
+    let symbolName: String
+    let title: String
+    let subtitle: String
+
+    var id: String { index }
 }

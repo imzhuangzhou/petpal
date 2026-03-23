@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct RootView: View {
     @EnvironmentObject private var appStore: AppStore
@@ -6,14 +7,21 @@ struct RootView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if appStore.session.userId == nil {
-                    WelcomeView()
-                } else if appStore.session.petId == nil {
-                    PetSetupView()
-                } else if !appStore.session.setupComplete {
+                switch appStore.onboardingRoute {
+                case .petSetup(let step):
+                    PetSetupView(initialStep: step)
+                case .cameraSetup:
                     DemoVideoUploadView()
-                } else {
-                    ChatView()
+                case .derivedFromSession:
+                    if appStore.session.userId == nil {
+                        WelcomeView()
+                    } else if appStore.session.petId == nil {
+                        PetSetupView()
+                    } else if !appStore.session.setupComplete {
+                        DemoVideoUploadView()
+                    } else {
+                        ChatView()
+                    }
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -48,6 +56,13 @@ enum PetPalTheme {
     static let selectionActive = Color(hex: "EDA579")
     static let surfaceCream = Color(hex: "FFF8EF")
     static let surfaceWarm = Color(hex: "FFF7EF")
+    static let avatarSurfaceTop = Color(hex: "FFFBF6")
+    static let avatarSurfaceBottom = Color(hex: "FFF4E9")
+    static let avatarSurfaceSelectedTop = Color(hex: "FFF8EF")
+    static let avatarSurfaceSelectedBottom = Color(hex: "FEEEDC")
+    static let avatarSurfaceStroke = Color(hex: "E9DDCE")
+    static let avatarSurfaceSelectedStroke = Color(hex: "E7A37B")
+    static let avatarHalo = Color(hex: "FFF0DD")
 
     static let pageGradient = LinearGradient(
         colors: [Color(hex: "FFFAF2"), Color(hex: "FFF7F0"), Color(hex: "F8F2E8")],
@@ -426,6 +441,57 @@ struct PetPalImageFill: View {
     }
 }
 
+struct PetPalAvatarSurface<Content: View>: View {
+    let isSelected: Bool
+    let cornerRadius: CGFloat
+    private let content: Content
+
+    init(
+        isSelected: Bool = false,
+        cornerRadius: CGFloat = 22,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.isSelected = isSelected
+        self.cornerRadius = cornerRadius
+        self.content = content()
+    }
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: isSelected
+                            ? [PetPalTheme.avatarSurfaceSelectedTop, PetPalTheme.avatarSurfaceSelectedBottom]
+                            : [PetPalTheme.avatarSurfaceTop, PetPalTheme.avatarSurfaceBottom],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay(
+                    RadialGradient(
+                        colors: [PetPalTheme.avatarHalo.opacity(isSelected ? 0.58 : 0.34), .clear],
+                        center: UnitPoint(x: 0.5, y: 0.34),
+                        startRadius: 8,
+                        endRadius: 150
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                )
+
+            content
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(
+                    isSelected
+                        ? PetPalTheme.avatarSurfaceSelectedStroke.opacity(0.68)
+                        : PetPalTheme.avatarSurfaceStroke.opacity(0.58),
+                    lineWidth: isSelected ? 1.25 : 0.9
+                )
+        )
+    }
+}
+
 struct PetPalStepIndicator: View {
     let total: Int
     let current: Int
@@ -527,22 +593,30 @@ struct PetPalLoadingOverlay: View {
 }
 
 struct PetPalChatHeader: View {
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+
     let avatar: PetPalArtAsset
     let avatarImageURL: URL?
     let title: String
+    let statusLines: [String]
     let subtitle: String
     let trailing: AnyView?
+
+    @State private var statusRotationStartDate = Date()
+    private let statusRotationInterval: TimeInterval = 2.8
 
     init<Trailing: View>(
         avatar: PetPalArtAsset,
         avatarImageURL: URL? = nil,
         title: String,
+        statusLines: [String] = [],
         subtitle: String,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.avatar = avatar
         self.avatarImageURL = avatarImageURL
         self.title = title
+        self.statusLines = statusLines
         self.subtitle = subtitle
         self.trailing = AnyView(trailing())
     }
@@ -551,11 +625,13 @@ struct PetPalChatHeader: View {
         avatar: PetPalArtAsset,
         avatarImageURL: URL? = nil,
         title: String,
+        statusLines: [String] = [],
         subtitle: String
     ) {
         self.avatar = avatar
         self.avatarImageURL = avatarImageURL
         self.title = title
+        self.statusLines = statusLines
         self.subtitle = subtitle
         self.trailing = nil
     }
@@ -587,6 +663,10 @@ struct PetPalChatHeader: View {
                     .font(.system(size: 18, weight: .black, design: .rounded))
                     .foregroundStyle(PetPalTheme.ink)
 
+                if !statusLines.isEmpty {
+                    statusCarouselLine
+                }
+
                 Text(subtitle)
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                     .foregroundStyle(PetPalTheme.success)
@@ -608,6 +688,51 @@ struct PetPalChatHeader: View {
                 .fill(Color(hex: "E6D5C2").opacity(0.76))
                 .frame(height: 1)
         }
+    }
+
+    @ViewBuilder
+    private var statusCarouselLine: some View {
+        if statusLines.count == 1, let line = statusLines.first {
+            statusText(line)
+        } else if accessibilityReduceMotion {
+            TimelineView(.periodic(from: statusRotationStartDate, by: statusRotationInterval)) { context in
+                statusText(statusLines[currentStatusIndex(for: context.date)])
+            }
+        } else {
+            TimelineView(.periodic(from: statusRotationStartDate, by: 0.14)) { context in
+                let index = currentStatusIndex(for: context.date)
+                let emphasis = currentStatusEmphasis(for: context.date)
+
+                statusText(statusLines[index], emphasis: emphasis)
+            }
+        }
+    }
+
+    private func statusText(_ text: String, emphasis: Double = 1) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .semibold, design: .rounded))
+            .foregroundStyle(PetPalTheme.inkSoft)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: .infinity, minHeight: 18, alignment: .leading)
+            .opacity(0.82 + (0.18 * emphasis))
+            .scaleEffect(0.992 + (0.008 * emphasis), anchor: .leading)
+            .offset(y: (1 - emphasis) * 1.5)
+            .accessibilityLabel("宠物状态 \(text)")
+    }
+
+    private func currentStatusIndex(for date: Date) -> Int {
+        guard !statusLines.isEmpty else { return 0 }
+        let elapsed = max(0, date.timeIntervalSince(statusRotationStartDate))
+        let step = Int(elapsed / statusRotationInterval)
+        return step % statusLines.count
+    }
+
+    private func currentStatusEmphasis(for date: Date) -> Double {
+        let elapsed = max(0, date.timeIntervalSince(statusRotationStartDate))
+        let cycleProgress = elapsed.truncatingRemainder(dividingBy: statusRotationInterval)
+        let ramp = min(cycleProgress / 0.42, 1)
+        return 1 - pow(1 - ramp, 3)
     }
 }
 
@@ -697,6 +822,131 @@ struct PetPalPrimaryButtonStyle: ButtonStyle {
     }
 }
 
+enum PetPalFeedbackTone {
+    case neutral
+    case success
+    case warning
+    case danger
+
+    var iconName: String {
+        switch self {
+        case .neutral:
+            return "info.circle.fill"
+        case .success:
+            return "checkmark.circle.fill"
+        case .warning:
+            return "exclamationmark.circle.fill"
+        case .danger:
+            return "xmark.circle.fill"
+        }
+    }
+
+    var foreground: Color {
+        switch self {
+        case .neutral:
+            return PetPalTheme.ink
+        case .success:
+            return PetPalTheme.success
+        case .warning:
+            return PetPalTheme.warning
+        case .danger:
+            return PetPalTheme.danger
+        }
+    }
+
+    var background: Color {
+        switch self {
+        case .neutral:
+            return Color(hex: "FFF6EA")
+        case .success:
+            return Color(hex: "EEF7ED")
+        case .warning:
+            return Color(hex: "FFF4E2")
+        case .danger:
+            return Color(hex: "FDEEEB")
+        }
+    }
+
+    var border: Color {
+        switch self {
+        case .neutral:
+            return PetPalTheme.line
+        case .success:
+            return PetPalTheme.success.opacity(0.32)
+        case .warning:
+            return PetPalTheme.warning.opacity(0.34)
+        case .danger:
+            return PetPalTheme.danger.opacity(0.34)
+        }
+    }
+}
+
+struct PetPalInlineFeedback: View {
+    let message: String
+    var tone: PetPalFeedbackTone = .neutral
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: tone.iconName)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(tone.foreground)
+                .padding(.top, 1)
+                .accessibilityHidden(true)
+
+            Text(message)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(PetPalTheme.ink)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(tone.background)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(tone.border, lineWidth: 1.2)
+        )
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct PetPalFieldLabel: View {
+    let title: String
+    var required: Bool = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(PetPalTheme.inkSoft)
+
+            if required {
+                Text("必填")
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .foregroundStyle(PetPalTheme.caramel)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color(hex: "FFF1DF"))
+                    )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(Color(hex: "F1D2B4"), lineWidth: 1)
+                    )
+                    .accessibilityHidden(true)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(required ? "\(title)，必填" : title)
+    }
+}
+
 struct PetPalSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -732,6 +982,8 @@ struct PetPalSmallGhostButtonStyle: ButtonStyle {
 }
 
 struct PetPalTextFieldModifier: ViewModifier {
+    var isInvalid = false
+
     func body(content: Content) -> some View {
         content
             .font(.system(size: 16, weight: .semibold, design: .rounded))
@@ -740,18 +992,26 @@ struct PetPalTextFieldModifier: ViewModifier {
             .padding(.vertical, 14)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(PetPalTheme.cardStrongFill)
+                    .fill(isInvalid ? Color(hex: "FFF4F0") : PetPalTheme.cardStrongFill)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(PetPalTheme.line, lineWidth: 1.5)
+                    .stroke(isInvalid ? PetPalTheme.danger : PetPalTheme.line, lineWidth: 1.5)
             )
     }
 }
 
 extension View {
-    func petPalTextFieldStyle() -> some View {
-        modifier(PetPalTextFieldModifier())
+    func petPalTextFieldStyle(isInvalid: Bool = false) -> some View {
+        modifier(PetPalTextFieldModifier(isInvalid: isInvalid))
+    }
+}
+
+enum PetPalHaptics {
+    static func warning() {
+        let generator = UINotificationFeedbackGenerator()
+        generator.prepare()
+        generator.notificationOccurred(.warning)
     }
 }
 

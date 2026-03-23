@@ -52,6 +52,13 @@ final class APIClient {
         )
     }
 
+    func updatePet(petID: Int, requestBody: UpdatePetRequest) async throws -> CreatePetResponse {
+        try await send(
+            endpoint: Endpoint(path: "/api/pet/\(petID)", method: .patch),
+            body: requestBody
+        )
+    }
+
     func generatePetAvatar(
         species: String,
         imageFileURL: URL
@@ -94,6 +101,10 @@ final class APIClient {
             body: body,
             contentType: "multipart/form-data; boundary=\(boundary)"
         )
+    }
+
+    func fetchVideoAnalysisDebug(cameraID: Int) async throws -> VideoAnalysisDebugResponse {
+        try await fetch(endpoint: Endpoint(path: "/api/debug/video-analysis/\(cameraID)"))
     }
 
     func sendChat(petID: Int, message: String) async throws -> ChatReplyResponse {
@@ -314,5 +325,75 @@ final class APIClient {
 
     private static func makeDecoder() -> JSONDecoder {
         JSONDecoder()
+    }
+}
+
+struct VideoAnalysisDebugResponse: Decodable, Sendable {
+    let cameraID: Int
+    let petID: Int?
+    let demoVideoName: String
+    let demoVideoURL: String
+    let contextSummary: String
+    let processingStatus: String
+    let stepStates: [VideoAnalysisDebugStep]
+    let frames: [VideoAnalysisDebugFrame]
+    let events: [VideoAnalysisDebugEvent]
+    let lastUpdatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case cameraID = "camera_id"
+        case petID = "pet_id"
+        case demoVideoName = "demo_video_name"
+        case demoVideoURL = "demo_video_url"
+        case contextSummary = "context_summary"
+        case processingStatus = "processing_status"
+        case stepStates = "step_states"
+        case frames
+        case events
+        case lastUpdatedAt = "last_updated_at"
+    }
+}
+
+struct VideoAnalysisDebugStep: Decodable, Sendable, Hashable, Identifiable {
+    let id: String
+    let title: String
+    let state: String
+}
+
+struct VideoAnalysisDebugFrame: Decodable, Sendable, Hashable, Identifiable {
+    var id: String { "\(sequence)-\(frameURL)" }
+
+    let sequence: Int
+    let frameURL: String
+    let videoSeconds: Double
+    let videoTimeText: String
+    let eventType: String
+    let description: String
+
+    enum CodingKeys: String, CodingKey {
+        case sequence
+        case frameURL = "frame_url"
+        case videoSeconds = "video_seconds"
+        case videoTimeText = "video_time_text"
+        case eventType = "event_type"
+        case description
+    }
+}
+
+struct VideoAnalysisDebugEvent: Decodable, Sendable, Hashable, Identifiable {
+    let id: Int
+    let eventType: String
+    let description: String
+    let timestamp: String
+    let durationSeconds: Double
+    let frameURL: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case eventType = "event_type"
+        case description
+        case timestamp
+        case durationSeconds = "duration_seconds"
+        case frameURL = "frame_url"
     }
 }

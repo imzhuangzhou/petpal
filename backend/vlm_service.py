@@ -24,7 +24,7 @@ TEXT_MODEL = "qwen-plus"
 DASHSCOPE_TIMEOUT_SECONDS = float(os.environ.get("DASHSCOPE_TIMEOUT_SECONDS", "45"))
 VERTEX_AI_PROJECT = os.environ.get("VERTEX_AI_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT", "")
 VERTEX_AI_LOCATION = os.environ.get("VERTEX_AI_LOCATION", "global")
-VERTEX_IMAGE_MODEL = os.environ.get("VERTEX_IMAGE_MODEL", "imagen-3.0-capability-001")
+VERTEX_IMAGE_MODEL = os.environ.get("VERTEX_IMAGE_MODEL", "gemini-3.1-flash-image-preview")
 VERTEX_IMAGE_TIMEOUT_MS = int(os.environ.get("VERTEX_IMAGE_TIMEOUT_MS", "120000"))
 VERTEX_IMAGE_MAX_RETRIES = int(os.environ.get("VERTEX_IMAGE_MAX_RETRIES", "3"))
 
@@ -132,6 +132,13 @@ def _build_pet_avatar_negative_prompt() -> str:
         "写实照片感，摄影风，真实毛发特写，超高细节皮毛纹理，电影感光影，复杂真实场景背景，"
         "夸张动作，完全复刻原图姿势，主体过小，非正方形构图，头部或耳朵被裁切，多只宠物，人类，"
         "文字，水印，项圈，衣服，玩具，3D 渲染，赛博色，高饱和霓虹色"
+    )
+
+
+def _build_pet_avatar_generation_prompt(species: str, identity_summary: str = "") -> str:
+    return (
+        f"{_build_pet_avatar_prompt(species, identity_summary)}"
+        f"请严格避免以下结果：{_build_pet_avatar_negative_prompt()}。"
     )
 
 
@@ -254,8 +261,6 @@ def _extract_image_error_detail(exc: Exception) -> str:
         return "连接 Vertex AI 服务失败，请检查本机网络、代理或稍后重试。"
 
     if isinstance(exc, genai_errors.APIError):
-        if exc.message == "Reference image should have reference id.":
-            return "参考图参数缺少 reference_id，请升级后的服务端代码重试。"
         if exc.message:
             return exc.message
         return f"HTTP {exc.status}"
@@ -477,15 +482,45 @@ def _is_retryable_vertex_error(exc: Exception) -> bool:
     return "server disconnected without sending a response" in message
 
 
+def _extract_generated_image_parts(response) -> list:
+    response_parts = getattr(response, "parts", None)
+    if response_parts:
+        return list(response_parts)
+
+    candidates = getattr(response, "candidates", None) or []
+    for candidate in candidates:
+        content = getattr(candidate, "content", None)
+        parts = getattr(content, "parts", None)
+        if parts:
+            return list(parts)
+
+    return []
+
+
+def _extract_generated_image(response) -> tuple[bytes, str]:
+    for part in _extract_generated_image_parts(response):
+        inline_data = getattr(part, "inline_data", None)
+        if not inline_data:
+            continue
+
+        image_bytes = getattr(inline_data, "data", None)
+        mime_type = getattr(inline_data, "mime_type", None) or "image/png"
+        if image_bytes:
+            return image_bytes, mime_type
+
+        raise RuntimeError("Vertex AI 返回了空图片内容。")
+
+    raise RuntimeError("Vertex AI 没有返回可用的图片结果。")
+
+
 def generate_pet_avatar(image_path: str, species: str) -> tuple[bytes, str]:
     """
-    Generate a cartoon avatar from a pet reference image using Vertex AI image editing.
+    Generate a cartoon avatar from a pet reference image using Vertex AI Gemini image generation.
 
     Returns:
         Tuple of (image bytes, mime type)
     """
     client = get_image_client()
-    negative_prompt = _build_pet_avatar_negative_prompt()
     started_at = time.perf_counter()
 
     logger.info(
@@ -508,29 +543,27 @@ def generate_pet_avatar(image_path: str, species: str) -> tuple[bytes, str]:
             )
         except Exception as exc:
             logger.warning("Pet identity extraction failed, falling back to single-stage generation: %s", exc)
-        prompt = _build_pet_avatar_prompt(species, identity_summary)
+        prompt = _build_pet_avatar_generation_prompt(species, identity_summary)
 
         for attempt in range(1, VERTEX_IMAGE_MAX_RETRIES + 1):
             try:
-                result = client.models.edit_image(
+                result = client.models.generate_content(
                     model=VERTEX_IMAGE_MODEL,
-                    prompt=prompt,
-                    reference_images=[
-                        genai_types.RawReferenceImage(
-                            reference_id=1,
-                            reference_image=genai_types.Image(
-                                image_bytes=image_bytes,
-                                mime_type=mime_type,
-                            )
-                        )
+                    contents=[
+                        prompt,
+                        genai_types.Part.from_bytes(
+                            data=image_bytes,
+                            mime_type=mime_type,
+                        ),
                     ],
-                    config=genai_types.EditImageConfig(
-                        number_of_images=1,
-                        aspect_ratio="1:1",
-                        base_steps=35,
-                        negative_prompt=negative_prompt,
-                        output_mime_type="image/png",
-                        edit_mode=genai_types.EditMode.EDIT_MODE_CONTROLLED_EDITING,
+                    config=genai_types.GenerateContentConfig(
+                        response_modalities=[
+                            genai_types.Modality.TEXT,
+                            genai_types.Modality.IMAGE,
+                        ],
+                        image_config=genai_types.ImageConfig(
+                            aspect_ratio="1:1",
+                        ),
                     ),
                 )
                 break
@@ -565,26 +598,18 @@ def generate_pet_avatar(image_path: str, species: str) -> tuple[bytes, str]:
     finally:
         client.close()
 
-    if not result.generated_images:
-        logger.error("Vertex AI returned no generated images after %.2fs", time.perf_counter() - started_at)
-        raise RuntimeError("Vertex AI 没有返回可用的图片结果。")
-
-    first_image = result.generated_images[0].image
-    if not first_image:
-        logger.error("Vertex AI returned empty image wrapper after %.2fs", time.perf_counter() - started_at)
-        raise RuntimeError("Vertex AI 没有返回可用的图片结果。")
-
-    if first_image.image_bytes:
+    try:
+        generated_bytes, generated_mime_type = _extract_generated_image(result)
         logger.info(
             "Finished pet avatar generation in %.2fs with mime_type=%s bytes=%s",
             time.perf_counter() - started_at,
-            first_image.mime_type or "image/png",
-            len(first_image.image_bytes),
+            generated_mime_type,
+            len(generated_bytes),
         )
-        return first_image.image_bytes, first_image.mime_type or "image/png"
-
-    logger.error("Vertex AI returned empty image bytes after %.2fs", time.perf_counter() - started_at)
-    raise RuntimeError("Vertex AI 返回了空图片内容。")
+        return generated_bytes, generated_mime_type
+    except RuntimeError as exc:
+        logger.error("Vertex AI returned no usable image after %.2fs: %s", time.perf_counter() - started_at, exc)
+        raise
 
 
 def encode_image_base64(image_path: str) -> str:

@@ -3,6 +3,12 @@ import SwiftUI
 enum PetPalArtAsset: String {
     case petCat = "ArtPetCat"
     case petDog = "ArtPetDog"
+    case petCatBritish = "ArtPetCatBritish"
+    case petCatSiamese = "ArtPetCatSiamese"
+    case petCatRagdoll = "ArtPetCatRagdoll"
+    case petDogCorgi = "ArtPetDogCorgi"
+    case petDogGolden = "ArtPetDogGolden"
+    case petDogShiba = "ArtPetDogShiba"
     case styleTsundere = "ArtStyleTsundere"
     case styleLoyal = "ArtStyleLoyal"
     case styleChatty = "ArtStyleChatty"
@@ -21,9 +27,9 @@ enum PetPalArtAsset: String {
 
     var placeholderColors: [Color] {
         switch self {
-        case .petCat, .styleTsundere:
+        case .petCat, .petCatBritish, .petCatSiamese, .petCatRagdoll, .styleTsundere:
             return [Color(hex: "F7C39B"), Color(hex: "E39A71")]
-        case .petDog, .styleLoyal:
+        case .petDog, .petDogCorgi, .petDogGolden, .petDogShiba, .styleLoyal:
             return [Color(hex: "DDBB93"), Color(hex: "C08B5F")]
         case .styleChatty, .featureReport:
             return [Color(hex: "CFE8D8"), Color(hex: "9BC9B0")]

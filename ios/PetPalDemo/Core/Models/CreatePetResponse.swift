@@ -19,6 +19,7 @@ struct CreatePetResponse: Decodable, Sendable {
     let photoURL: String
     let avatarURL: String
     let ownerAlias: String
+    let languageStyle: String
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -27,6 +28,7 @@ struct CreatePetResponse: Decodable, Sendable {
         case photoURL = "photo_url"
         case avatarURL = "avatar_url"
         case ownerAlias = "owner_alias"
+        case languageStyle = "language_style"
     }
 
     init(from decoder: Decoder) throws {
@@ -37,5 +39,6 @@ struct CreatePetResponse: Decodable, Sendable {
         photoURL = try container.decode(String.self, forKey: .photoURL)
         avatarURL = try container.decode(String.self, forKey: .avatarURL)
         ownerAlias = try container.decodeIfPresent(String.self, forKey: .ownerAlias) ?? ""
+        languageStyle = try container.decodeIfPresent(String.self, forKey: .languageStyle) ?? "tsundere"
     }
 }

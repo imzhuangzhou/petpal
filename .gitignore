@@ -16,12 +16,16 @@ backend/*.db-wal
 # Xcode / SwiftPM
 DerivedData/
 .build/
+ios/build/
 tmp/
 *.xcuserdata/
 *.xcuserdatad/
 *.xcworkspace/xcuserdata/
 *.xcodeproj/xcuserdata/
 *.xcuserstate
+
+# Generated output
+output/
 
 # Environment
 .env

@@ -17,6 +17,8 @@ fake_vlm_service.review_pet_vocalization = lambda *args, **kwargs: {
 import proactive_chat
 import video_processor
 
+sys.modules.pop("vlm_service", None)
+
 
 def _pcm_block(amplitude: int, samples: int) -> bytes:
     return struct.pack("<" + "h" * samples, *([amplitude] * samples))

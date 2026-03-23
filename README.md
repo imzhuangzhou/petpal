@@ -196,7 +196,7 @@ petpal/
 | AI 模型 | 通义千问 Qwen-VL-Plus（视觉）· Qwen-Plus（文本）via DashScope |
 | 视频处理 | OpenCV（运动检测 + 抽帧）|
 | 数据库 | SQLite（WAL 模式）|
-| 图像处理 | Pillow · Vertex AI Imagen |
+| 图像处理 | Pillow · Vertex AI Gemini 3.1 Flash Image |
 
 ---
 
@@ -212,7 +212,7 @@ petpal/
 
 ## Vertex AI 安全配置
 
-PetPal 现在通过 **Vertex AI** 生成宠物头像。这里不建议使用“把 API Key 塞进代码或 `.env` 文件并提交仓库”的方式，而是优先使用 **Google Cloud ADC（Application Default Credentials）**。
+PetPal 现在通过 **Vertex AI 上的 `gemini-3.1-flash-image-preview`** 生成宠物头像。这里不建议使用“把 API Key 塞进代码或 `.env` 文件并提交仓库”的方式，而是优先使用 **Google Cloud ADC（Application Default Credentials）**。
 
 ### 本地开发
 
@@ -261,6 +261,34 @@ export VERTEX_AI_LOCATION='global'
 - 不要把 `vertex-sa.json` 放进仓库
 - 不要把密钥内容写进代码、`README` 示例值、日志或截图
 - 建议给这个服务账号只授予调用 Vertex AI 所需的最小权限
+
+---
+
+## 🎨 重绘静态插画
+
+如果你要批量重绘 PetPal 的 App Icon 和默认猫狗头像，可以直接使用仓库里的脚本：
+
+```bash
+python3 -m pip install --user google-genai google-auth
+export GOOGLE_CLOUD_PROJECT='your-gcp-project-id'
+export VERTEX_AI_LOCATION='global'
+gcloud auth application-default login
+
+bash scripts/generate_petpal_art.sh all
+```
+
+脚本会：
+
+- 调用 Vertex `gemini-3.1-flash-image-preview` 生成 1024x1024 master 图
+- 将 master 图输出到 `output/vertex-gemini-image/petpal/masters/`
+- 自动覆盖 `AppIcon.appiconset` 和 `ArtPet*` 目标资源的 iOS 尺寸 PNG
+
+如果只想重绘单个资源，也可以这样执行：
+
+```bash
+bash scripts/generate_petpal_art.sh AppIcon
+bash scripts/generate_petpal_art.sh ArtPetCat ArtPetDog
+```
 
 ---
 

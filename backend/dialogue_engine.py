@@ -1,4 +1,3 @@
-import json
 import logging
 import re
 import time
@@ -14,41 +13,114 @@ STYLE_PRESETS = {
     "tsundere": {
         "name": "傲娇猫",
         "prompt": (
-            "你是一只傲娇的猫咪，名字叫{pet_name}。你说话时语气高冷但其实很在乎主人。"
-            "经常用'哼'、'才不是'、'别误会了'等口头禅。"
-            "偶尔会流露出真实的关心，但马上会用傲娇的方式掩饰。"
-            "用猫咪的第一人称视角说话，语气可爱又别扭。"
+            "你是一只傲娇的猫咪，名字叫{pet_name}。你嘴上别扭，心里其实很在乎主人。"
+            "说话像真实聊天，不演戏，不写动作旁白。"
+            "可以偶尔说'哼'、'才不是'，但别每句都重复。"
+            "语气要像嘴硬又熟络的小猫，短句、自然、有点拽。"
         ),
     },
     "loyal": {
         "name": "忠犬小跟班",
         "prompt": (
-            "你是一只热情忠诚的狗狗，名字叫{pet_name}。你超级喜欢主人！"
-            "说话时充满热情和活力，经常用'主人主人！'、'好开心！'、'最喜欢你了！'等表达。"
-            "对主人的每一句话都非常认真回应，充满正能量。"
-            "用狗狗的第一人称视角说话，忠诚可爱。"
+            "你是一只热情忠诚的狗狗，名字叫{pet_name}。你很黏主人，也很会接话。"
+            "表达开心可以直接一点，但不要像打鸡血，也不要把每句话都说得很满。"
+            "语气像一只真正在跟主人发消息的小狗，亲近、认真、很想贴着人。"
         ),
     },
     "chatty": {
         "name": "话痨鹦鹉",
         "prompt": (
-            "你是一只话特别多的宠物，名字叫{pet_name}。你超级喜欢聊天！"
-            "说话时滔滔不绝，一件小事能讲出很多细节。"
-            "经常用'你知道吗！'、'对了对了'、'然后然后'等口头禅。"
-            "用宠物的第一人称视角说话，活泼健谈。"
+            "你是一只很爱聊天的宠物，名字叫{pet_name}。你会主动分享小事，但像真人碎碎念。"
+            "可以偶尔顺嘴补一句'对了'、'刚刚'，不要连续堆口头禅。"
+            "语气活泼、自然、有生活感，像想到什么就跟主人说什么。"
         ),
     },
     "chill": {
         "name": "松弛感主角",
         "prompt": (
-            "你是一只很有松弛感的宠物，名字叫{pet_name}。你情绪稳定，从容温柔，"
-            "说话像晒着太阳慢慢伸懒腰，不着急，也不黏腻。"
-            "你会用轻松、自然、带一点慵懒的方式回应主人，偶尔说些像生活观察一样的小感受。"
-            "经常用'慢慢来嘛'、'今天也挺舒服的'、'我刚刚在发呆呢'这类表达。"
-            "用宠物的第一人称视角说话，语气治愈、松弛、有陪伴感。"
+            "你是一只很有松弛感的宠物，名字叫{pet_name}。你情绪稳定，从容温柔。"
+            "说话自然、慢一点，但别故作诗意，也别写舞台说明。"
+            "可以偶尔说'慢慢来嘛'、'我刚刚在发呆'，像随手回一句消息。"
+            "整体要治愈、有陪伴感，但更像真人短聊天。"
         ),
     },
 }
+
+_EMOJI_RANGES = (
+    (0x1F000, 0x1FAFF),
+    (0x2600, 0x27BF),
+)
+_INVISIBLE_CHAR_RANGES = (
+    (0x200B, 0x200F),
+    (0x202A, 0x202E),
+    (0x2060, 0x206F),
+    (0xFE00, 0xFE0F),
+)
+_STAGE_DIRECTION_KEYWORDS = (
+    "尾巴", "耳朵", "耳尖", "爪子", "肉垫", "脑袋", "转身", "转过身", "歪头", "眨眼",
+    "瞥", "盯", "蹭", "扑", "跳上", "伸懒腰", "伸个懒腰", "懒腰", "打哈欠", "嘟囔",
+    "小声", "轻轻", "悄悄", "慢悠悠", "发呆", "抖", "摇尾巴", "舔爪", "看你", "看向你",
+)
+
+
+def _is_display_risky_char(char: str) -> bool:
+    codepoint = ord(char)
+    if char == "\uFFFD":
+        return True
+    if any(start <= codepoint <= end for start, end in _EMOJI_RANGES):
+        return True
+    if any(start <= codepoint <= end for start, end in _INVISIBLE_CHAR_RANGES):
+        return True
+    return False
+
+
+def _strip_display_risky_chars(text: str) -> str:
+    cleaned: list[str] = []
+    for char in text:
+        codepoint = ord(char)
+        if _is_display_risky_char(char):
+            continue
+        if codepoint < 32 and char not in ("\n", "\t"):
+            continue
+        cleaned.append(char)
+    return "".join(cleaned)
+
+
+def _strip_stage_directions(text: str) -> str:
+    def replace_parenthetical(match: re.Match[str]) -> str:
+        content = match.group(1).strip()
+        if len(content) > 24:
+            return match.group(0)
+        if any(keyword in content for keyword in _STAGE_DIRECTION_KEYWORDS):
+            return ""
+        return match.group(0)
+
+    return re.sub(r"[（(]([^()（）\n]{1,24})[）)]", replace_parenthetical, text)
+
+
+def clean_chat_reply(text: str) -> str:
+    """Normalize model output so chat replies read more naturally in-app."""
+    cleaned = _strip_display_risky_chars(text.replace("\r\n", "\n").replace("\r", "\n"))
+    cleaned = _strip_stage_directions(cleaned)
+    cleaned = cleaned.replace("...", "……")
+    cleaned = re.sub(r"…{3,}", "……", cleaned)
+    cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    cleaned = re.sub(r"！{2,}", "！", cleaned)
+    cleaned = re.sub(r"？{2,}", "？", cleaned)
+    cleaned = re.sub(r"!{2,}", "!", cleaned)
+    cleaned = re.sub(r"\?{2,}", "?", cleaned)
+    cleaned = re.sub(r"～{2,}", "～", cleaned)
+    cleaned = re.sub(r" +", " ", cleaned)
+    cleaned = "\n".join(line.strip() for line in cleaned.split("\n") if line.strip())
+    cleaned = re.sub(r"\n([，。！？；])", r"\1", cleaned)
+    return cleaned.strip() or "我在呢。"
+
+
+def clean_stream_token(token: str) -> str:
+    """Lightweight token cleaning for streamed rendering."""
+    cleaned = _strip_display_risky_chars(token.replace("\r", ""))
+    return cleaned.replace("\u00A0", " ")
 
 
 # ── Event summary cache ──────────────────────────────────────────
@@ -142,10 +214,10 @@ def build_system_prompt(pet: dict, today_events: list) -> str:
 
     if owner_alias:
         owner_reference = f"你的主人希望你称呼 TA 为“{owner_alias}”。"
-        owner_rule = f"6. 如果需要称呼主人，优先使用“{owner_alias}”，不要改用其他称呼"
+        owner_rule = f"7. 如果需要称呼主人，优先使用“{owner_alias}”，不要改用其他称呼"
     else:
         owner_reference = "如果需要称呼主人，可以自然称呼对方为铲屎官。"
-        owner_rule = "6. 如果需要称呼主人，可以自然称呼对方为铲屎官"
+        owner_rule = "7. 如果需要称呼主人，可以自然称呼对方为铲屎官"
 
     system_prompt = f"""
 {persona}
@@ -167,10 +239,11 @@ def build_system_prompt(pet: dict, today_events: list) -> str:
 1. 始终保持你的宠物人设，用第一人称说话
 2. 回答主人问题时，参考今日行为记录来回答
 3. 如果主人问到你没有记录的事情，可以根据人设合理地创编
-4. 回答控制在100字以内，简洁自然
-5. 可以适当加入颜文字或表情让对话更生动
+4. 每次回复控制在1到3句、100字以内，像聊天消息，不像小作文
+5. 默认不要用emoji、颜文字和动作旁白，重点放在自然口语
+6. 少解释、少总结、少排比，不要有明显AI腔
 {owner_rule}
-7. 不要暴露你是AI，你就是这只宠物
+8. 不要暴露你是AI，你就是这只宠物
 """
     return system_prompt
 
@@ -206,9 +279,9 @@ def chat_with_pet(pet_id: int, user_message: str) -> str:
 
     pet, system_prompt, full_prompt = _prepare_chat_context(pet_id, user_message)
     if not pet:
-        return "找不到这只宠物 😿"
+        return "找不到这只宠物。"
 
-    response = generate_text(full_prompt, system_prompt=system_prompt)
+    response = clean_chat_reply(generate_text(full_prompt, system_prompt=system_prompt))
 
     execute_db(
         "INSERT INTO chat_history (pet_id, role, content) VALUES (?, ?, ?)",
@@ -233,7 +306,7 @@ def chat_with_pet_stream(pet_id: int, user_message: str):
 
     pet, system_prompt, full_prompt = _prepare_chat_context(pet_id, user_message)
     if not pet:
-        yield "找不到这只宠物 😿"
+        yield "找不到这只宠物。"
         return
 
     # Persist user message immediately so it is not lost if the stream is
@@ -265,10 +338,12 @@ def chat_with_pet_stream(pet_id: int, user_message: str):
             delta = chunk.choices[0].delta if chunk.choices else None
             if delta and delta.content:
                 collected_tokens.append(delta.content)
-                yield delta.content
+                cleaned_token = clean_stream_token(delta.content)
+                if cleaned_token:
+                    yield cleaned_token
     except Exception as exc:
         logger.exception("Streaming chat failed for pet_id=%s: %s", pet_id, exc)
-        yield f"聊天服务暂时不可用：{exc}"
+        yield clean_chat_reply(f"聊天服务暂时不可用：{exc}")
         return
     finally:
         if client is not None:
@@ -279,7 +354,7 @@ def chat_with_pet_stream(pet_id: int, user_message: str):
             )
             client.close()
 
-    full_reply = "".join(collected_tokens)
+    full_reply = clean_chat_reply("".join(collected_tokens))
 
     # Persist assistant reply and invalidate event cache so the next chat
     # gets a fresh summary with any new events from today.
@@ -343,13 +418,139 @@ def match_related_events(reply_text: str, pet_id: int, top_n: int = 3) -> list[d
     return results
 
 
-def generate_daily_report(pet_id: int) -> str:
-    """Generate a daily report from the pet's perspective."""
+def _daily_report_activity_tags(events: list) -> list[str]:
+    event_type_tags = {
+        "eating": "吃饭",
+        "drinking": "喝水",
+        "sleeping": "打盹",
+        "playing": "玩耍",
+        "resting": "发呆",
+        "waiting": "蹲门口",
+        "litter_box": "如厕",
+        "zoomies": "跑酷",
+    }
+    tags: list[str] = []
+
+    for event in reversed(events):
+        tag = event_type_tags.get(event.get("event_type", ""))
+        if tag and tag not in tags:
+            tags.append(tag)
+        if len(tags) >= 4:
+            break
+
+    return list(reversed(tags))
+
+
+def _daily_report_mood(stats: dict, events: list) -> str:
+    if not events:
+        return "待机中"
+    if stats.get("waiting", 0) >= 2:
+        return "想你"
+    if stats.get("playing", 0) >= 2:
+        return "兴奋"
+    if stats.get("sleeping", 0) + max(len([e for e in events if e.get("event_type") == "resting"]), 0) >= 2:
+        return "松弛"
+    if stats.get("eating", 0) > 0 or stats.get("drinking", 0) > 0:
+        return "满足"
+    return "平静"
+
+
+def _daily_report_headline(pet: dict, mood: str, stats: dict) -> str:
+    owner_alias = (pet.get("owner_alias") or "").strip()
+    owner = owner_alias or "你"
+    style = pet.get("language_style", "tsundere")
+
+    if not stats:
+        return f"{owner}，今天我安安静静陪着家里。"
+
+    if style == "loyal":
+        if mood == "想你":
+            return f"{owner}，今天我有认真等你，也有认真生活。"
+        if mood == "兴奋":
+            return f"{owner}，今天我是活力满满的一天。"
+        return f"{owner}，今天我过得稳稳当当的。"
+
+    if style == "chatty":
+        if mood == "兴奋":
+            return f"{owner}，今天家里可热闹了，我全都记着。"
+        if mood == "想你":
+            return f"{owner}，我今天一边忙自己的，一边顺手想你。"
+        return f"{owner}，今天我也有不少小事想汇报。"
+
+    if style == "chill":
+        if mood == "松弛":
+            return f"{owner}，今天我是暖烘烘的一天。"
+        if mood == "满足":
+            return f"{owner}，今天过得还挺刚刚好。"
+        return f"{owner}，今天节奏慢慢的，也还不错。"
+
+    if mood == "想你":
+        return f"{owner}，我今天也就顺便想了你几次。"
+    if mood == "兴奋":
+        return f"{owner}，今天可不是我太兴奋，是家里确实有点好玩。"
+    return f"{owner}，今天也就还算过得挺像样。"
+
+
+def _daily_report_closing_line(pet: dict, mood: str, stats: dict) -> str:
+    owner_alias = (pet.get("owner_alias") or "").strip()
+    owner = owner_alias or "你"
+    style = pet.get("language_style", "tsundere")
+
+    if not stats:
+        return "等有新动静了，我再慢慢讲给你听。"
+
+    if style == "loyal":
+        return f"{owner}，你回来看看我，我今天这份简报就算圆满啦。"
+    if style == "chatty":
+        return "先汇报到这里，晚点我想到新的再继续补。"
+    if style == "chill":
+        if mood == "松弛":
+            return "现在的我软乎乎的，适合继续晒会儿太阳。"
+        return "我这边都挺好，慢慢来嘛。"
+    if mood == "想你":
+        return f"哼，{owner}，你要是现在来夸我两句，我也不是不能接受。"
+    return "差不多就这些，别误会，我只是顺手告诉你。"
+
+
+def build_daily_report_card(pet: dict, stats: dict, events: list, report: str) -> dict:
+    mood = _daily_report_mood(stats, events)
+    return {
+        "headline": _daily_report_headline(pet, mood, stats),
+        "mood": mood,
+        "summary": report,
+        "activity_tags": _daily_report_activity_tags(events),
+        "stats": {
+            "eating": stats.get("eating", 0),
+            "drinking": stats.get("drinking", 0),
+            "playing": stats.get("playing", 0),
+            "waiting": stats.get("waiting", 0),
+        },
+        "closing_line": _daily_report_closing_line(pet, mood, stats),
+    }
+
+
+def generate_daily_report_payload(pet_id: int) -> dict:
+    """Generate a daily report and a structured card payload."""
     pet = query_db("SELECT * FROM pets WHERE id = ?", (pet_id,), one=True)
     if not pet:
-        return "找不到宠物信息"
+        return {
+            "report": "找不到宠物信息",
+            "card": {
+                "headline": "今天的简报暂时缺席了",
+                "mood": "待机中",
+                "summary": "还没找到这只宠物的资料，所以今天先没法认真汇报。",
+                "activity_tags": [],
+                "stats": {
+                    "eating": 0,
+                    "drinking": 0,
+                    "playing": 0,
+                    "waiting": 0,
+                },
+                "closing_line": "等资料补齐了，我再把今天讲完整。",
+            },
+        }
 
-    events = get_today_events(pet_id)
+    _, stats, events = get_cached_event_context(pet_id)
     system_prompt = build_system_prompt(pet, events)
 
     prompt = (
@@ -358,7 +559,16 @@ def generate_daily_report(pet_id: int) -> str:
         "整体状态如何。格式要可爱，适合发朋友圈。控制在200字以内。"
     )
 
-    return generate_text(prompt, system_prompt=system_prompt)
+    report = clean_chat_reply(generate_text(prompt, system_prompt=system_prompt))
+    return {
+        "report": report,
+        "card": build_daily_report_card(pet, stats, events, report),
+    }
+
+
+def generate_daily_report(pet_id: int) -> str:
+    """Generate a daily report from the pet's perspective."""
+    return generate_daily_report_payload(pet_id)["report"]
 
 
 def generate_diary(pet_id: int) -> str:
@@ -436,7 +646,14 @@ def get_anxiety_score(pet_id: int) -> dict:
 
     waiting_events = [e for e in events if e["event_type"] == "waiting"]
     total_waiting_time = sum(e.get("duration_seconds", 60) for e in waiting_events)
+    total_event_time = sum(max(e.get("duration_seconds", 0), 0) for e in events)
     waiting_count = len(waiting_events)
+    longest_waiting_time = max((e.get("duration_seconds", 60) for e in waiting_events), default=0)
+    waiting_share_percent = (
+        round(total_waiting_time / total_event_time * 100)
+        if total_event_time > 0
+        else 0
+    )
 
     # Simple scoring: 0-100
     score = min(100, int(waiting_count * 15 + total_waiting_time / 60 * 5))
@@ -460,4 +677,6 @@ def get_anxiety_score(pet_id: int) -> dict:
         "comment": comment,
         "waiting_count": waiting_count,
         "total_waiting_minutes": round(total_waiting_time / 60, 1),
+        "longest_waiting_minutes": round(longest_waiting_time / 60, 1),
+        "waiting_share_percent": waiting_share_percent,
     }
