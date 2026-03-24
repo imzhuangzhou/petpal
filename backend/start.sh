@@ -28,5 +28,7 @@ fi
 
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
+export VERTEX_IMAGE_MODEL="${VERTEX_IMAGE_MODEL:-gemini-3.1-flash-image-preview}"
+export PETPAL_ENABLE_AVATAR_IDENTITY_EXTRACTION="${PETPAL_ENABLE_AVATAR_IDENTITY_EXTRACTION:-true}"
 
 exec python -m uvicorn main:app --reload --host "$HOST" --port "$PORT"

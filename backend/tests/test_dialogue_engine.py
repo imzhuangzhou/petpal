@@ -305,6 +305,7 @@ class SystemPromptTests(unittest.TestCase):
         self.assertIn("饮水次数：2 次", prompt)
         self.assertIn("猫咪在窗边发呆", prompt)
         self.assertIn("铲屎官", prompt)
+        self.assertIn("本轮回答策略", prompt)
         self.assertIn("1到3句", prompt)
         self.assertIn("默认不要用emoji", prompt)
         self.assertNotIn("月光喵", prompt)
@@ -340,6 +341,50 @@ class SystemPromptTests(unittest.TestCase):
         self.assertIn("boss", prompt)
         self.assertIn("优先使用“boss”", prompt)
         self.assertNotIn("铲屎官", prompt)
+
+    @patch("dialogue_engine.build_memory_prompt_context")
+    @patch("dialogue_engine.get_cached_event_context")
+    def test_build_system_prompt_prefers_recent_clip_details_for_immediate_focus(
+        self,
+        mock_get_cached_event_context,
+        mock_build_memory_prompt_context,
+    ):
+        mock_get_cached_event_context.return_value = ("今天还没有记录到任何事件。", {}, [])
+        mock_build_memory_prompt_context.return_value = {
+            "daily_counts": {},
+            "daily_summary": "今天主要在门口活动。",
+            "recent_clip_lines": ["- 5.0s-17.0s：在门口来回踱步"],
+            "immediate_clip_lines": [
+                "- 5.0s-17.0s：在门口来回踱步；动作：等待主人；位置：门口；情绪猜测：想你"
+            ],
+            "profile_lines": ["- preferred_zone：窗边"],
+            "health_flags": [],
+            "baseline_summary": "今天的等待主人比最近几天更频繁。",
+        }
+        pet = {
+            "id": 1,
+            "name": "奶糖",
+            "species": "cat",
+            "breed": "",
+            "language_style": "chill",
+            "style_prompt": "",
+            "owner_alias": "",
+        }
+
+        prompt = dialogue_engine.build_system_prompt(pet, [], memory_focus="immediate")
+
+        self.assertIn("即时片段细节", prompt)
+        self.assertIn("优先依据最近片段细节", prompt)
+        self.assertIn("位置：门口", prompt)
+        self.assertIn("近期变化", prompt)
+
+
+class MemoryFocusTests(unittest.TestCase):
+    def test_infer_memory_focus_returns_immediate_for_recent_location_question(self):
+        self.assertEqual(dialogue_engine._infer_memory_focus("你刚刚是不是在门口等我呀"), "immediate")
+
+    def test_infer_memory_focus_returns_historical_for_habit_question(self):
+        self.assertEqual(dialogue_engine._infer_memory_focus("你平时是不是总爱待在窗边"), "historical")
 
 
 class TextCleaningTests(unittest.TestCase):

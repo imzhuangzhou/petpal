@@ -1,10 +1,11 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from memory_service import build_daily_memory_payload
+from memory_service import build_daily_memory_payload, build_memory_prompt_context
 
 
 class BuildDailyMemoryPayloadTests(unittest.TestCase):
@@ -69,6 +70,52 @@ class BuildDailyMemoryPayloadTests(unittest.TestCase):
         self.assertEqual(payload["appearance_of_day"]["top_outfit"], "黄色背心")
         self.assertEqual(payload["health_flags"][0]["level"], "normal")
         self.assertIn("summary", payload["change_vs_recent_baseline"])
+
+
+class BuildMemoryPromptContextTests(unittest.TestCase):
+    @patch("memory_service.get_profile_memories")
+    @patch("memory_service.get_latest_daily_memory")
+    @patch("memory_service.get_daily_memory")
+    @patch("memory_service.get_recent_clip_memories")
+    def test_includes_immediate_clip_details_and_baseline_summary(
+        self,
+        mock_recent_clips,
+        mock_get_daily_memory,
+        mock_get_latest_daily_memory,
+        mock_get_profile_memories,
+    ):
+        mock_recent_clips.return_value = [
+            {
+                "summary": "在门口来回踱步",
+                "source_video_start_seconds": 5.0,
+                "source_video_end_seconds": 17.0,
+                "actions": [{"label": "等待主人"}],
+                "environment": {"zone_guess": "door"},
+                "mood_hypothesis": {"label": "想你"},
+                "intent_hypothesis": {"label": "等人"},
+                "interaction": {"contains_person": False},
+                "health_signals": [],
+            }
+        ]
+        mock_get_daily_memory.return_value = {
+            "daily_summary": "今天主要出现了等待主人。",
+            "activity_counts": {"actions": {"等待主人": 1}},
+            "health_flags": [],
+            "change_vs_recent_baseline": {"summary": "今天的等待主人比最近几天更频繁。"},
+        }
+        mock_get_latest_daily_memory.return_value = None
+        mock_get_profile_memories.return_value = [
+            {"memory_type": "preferred_zone", "value": {"label": "窗边"}}
+        ]
+
+        context = build_memory_prompt_context(3)
+
+        self.assertEqual(
+            context["immediate_clip_lines"][0],
+            "- 5.0s-17.0s：在门口来回踱步；动作：等待主人；位置：门口；情绪猜测：想你；意图猜测：等人",
+        )
+        self.assertEqual(context["baseline_summary"], "今天的等待主人比最近几天更频繁。")
+        self.assertEqual(context["profile_lines"], ["- preferred_zone：窗边"])
 
 
 if __name__ == "__main__":

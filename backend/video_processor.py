@@ -36,6 +36,11 @@ SEGMENT_MERGE_GAP_SECONDS = 5.0
 SEGMENT_MIN_SECONDS = 3.0
 SEGMENT_TARGET_SECONDS = 25.0
 SEGMENT_MAX_SECONDS = 45.0
+COMMON_FFMPEG_PATHS = (
+    "/opt/homebrew/bin/ffmpeg",
+    "/usr/local/bin/ffmpeg",
+    "/usr/bin/ffmpeg",
+)
 
 
 def process_video(video_path: str, frame_interval: int = 5, motion_threshold: float = 5000.0):
@@ -725,14 +730,27 @@ def _get_ffmpeg_executable() -> str:
     if system_ffmpeg:
         return system_ffmpeg
 
+    for candidate in COMMON_FFMPEG_PATHS:
+        resolved_path = _resolve_executable(candidate)
+        if resolved_path:
+            return resolved_path
+
     try:
         imageio_ffmpeg = importlib.import_module("imageio_ffmpeg")
     except ImportError as exc:
-        raise RuntimeError(
-            "未找到可用的 ffmpeg。请安装系统 ffmpeg，或在后端环境中安装 imageio-ffmpeg。"
-        ) from exc
+        raise _build_ffmpeg_unavailable_error() from exc
 
-    return imageio_ffmpeg.get_ffmpeg_exe()
+    try:
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except RuntimeError as exc:
+        raise _build_ffmpeg_unavailable_error() from exc
+
+
+def _build_ffmpeg_unavailable_error() -> RuntimeError:
+    return RuntimeError(
+        "未找到可用的 ffmpeg。请先安装系统 ffmpeg，或设置 PETPAL_FFMPEG_PATH / IMAGEIO_FFMPEG_EXE 指向 ffmpeg 可执行文件。"
+        " macOS（Homebrew）可执行：brew install ffmpeg"
+    )
 
 
 def _resolve_executable(candidate: Optional[str]) -> Optional[str]:

@@ -68,7 +68,7 @@ struct ChatView: View {
 
                 ScrollViewReader { proxy in
                     ScrollView(showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 12) {
+                        LazyVStack(alignment: .leading, spacing: 12) {
                             ForEach(messages) { message in
                                 messageRow(message)
                             }
@@ -1192,13 +1192,12 @@ struct ChatView: View {
     }
 
     private func sendTextMessage() async {
+        let message = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft = ""
         await sendMessage(
-            userMessage: ChatMessage(role: .user, content: draft.trimmingCharacters(in: .whitespacesAndNewlines)),
-            backendMessage: draft
+            userMessage: ChatMessage(role: .user, content: message),
+            backendMessage: message
         )
-        if !isSubmitting {
-            draft = ""
-        }
     }
 
     private func sendMessage(userMessage: ChatMessage, backendMessage: String) async {
@@ -1266,16 +1265,24 @@ struct ChatView: View {
         guard !hasLoadedInitialMessages else { return }
         hasLoadedInitialMessages = true
 
+        let placeholderMessage = openingAssistantMessage
+        messages = [placeholderMessage]
+
         guard let petID = appStore.session.petId else {
-            messages = [openingAssistantMessage]
             return
         }
 
         do {
             let history = try await appStore.apiClient.fetchChatHistory(petID: petID)
-            messages = history.isEmpty ? [openingAssistantMessage] : history
+            let isStillShowingPlaceholder =
+                messages.count == 1 &&
+                messages.first?.id == placeholderMessage.id
+
+            if !history.isEmpty, isStillShowingPlaceholder {
+                messages = history
+            }
         } catch {
-            messages = [openingAssistantMessage]
+            // Keep the placeholder opening message visible when history is unavailable.
         }
     }
 
@@ -1970,7 +1977,8 @@ private struct PetPalVoiceCallView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let topSectionPadding = max(proxy.safeAreaInsets.top, 20) + 16
+            let topContentPadding = max(proxy.safeAreaInsets.top - 6, 16)
+            let bottomSectionPadding = max(proxy.safeAreaInsets.bottom, 12)
 
             ZStack {
                 voiceCallBackground
@@ -1980,11 +1988,13 @@ private struct PetPalVoiceCallView: View {
                     monitorStage
                         .frame(maxWidth: 520)
                         .padding(.horizontal, 14)
-                        .padding(.top, topSectionPadding)
-                    Spacer(minLength: 0)
+                        .padding(.top, topContentPadding)
+                    Spacer(minLength: 18)
+                    bottomControls
+                        .frame(maxWidth: 520)
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, bottomSectionPadding)
                 }
-
-                bottomControls
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -2036,84 +2046,26 @@ private struct PetPalVoiceCallView: View {
 
     private var monitorStage: some View {
         VStack(spacing: 14) {
-            monitorTopOverlay
+            callSessionSummary
 
             monitorVideoSurface
         }
     }
 
     private var monitorVideoSurface: some View {
-        ZStack {
-            Group {
-                if let previewURL {
-                    LoopingVideoPlayerView(url: previewURL)
-                } else {
-                    VoiceCallMockMonitorView(cameraName: cameraName)
-                }
-            }
-            .overlay {
-                LinearGradient(
-                    colors: [Color.black.opacity(0.2), .clear, Color.black.opacity(0.14), Color.black.opacity(0.52)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 34, style: .continuous)
-                    .stroke(Color.white.opacity(0.14), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.28), radius: 24, y: 14)
-            .overlay(alignment: .bottomLeading) {
-                monitorBottomOverlay
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 22)
+        Group {
+            if let previewURL {
+                LoopingVideoPlayerView(url: previewURL)
+            } else {
+                VoiceCallMockMonitorView(cameraName: cameraName)
             }
         }
+        .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
+        .shadow(color: Color.black.opacity(0.28), radius: 24, y: 14)
         .aspectRatio(16 / 9, contentMode: .fit)
     }
 
-    private var monitorTopOverlay: some View {
-        HStack(spacing: 12) {
-            Group {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 17, weight: .black))
-                        .foregroundStyle(.white)
-                        .frame(width: 42, height: 42)
-                        .background(Color.white.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("返回聊天")
-            }
-            .frame(width: 84, alignment: .leading)
-
-            Text("语音通话")
-                .font(.system(size: 17, weight: .black, design: .rounded))
-                .foregroundStyle(.white.opacity(0.94))
-                .lineLimit(1)
-                .frame(maxWidth: .infinity)
-
-            Group {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text(context.date, format: .dateTime.hour().minute())
-                        .font(.system(size: 13, weight: .bold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(Color.white.opacity(0.82))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.9)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .frame(width: 84, alignment: .trailing)
-                }
-                .accessibilityLabel("当前时间")
-            }
-            .frame(width: 84, alignment: .trailing)
-        }
-    }
-
-    private var monitorBottomOverlay: some View {
+    private var callSessionSummary: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -2165,90 +2117,95 @@ private struct PetPalVoiceCallView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .background(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(Color.white.opacity(0.08))
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+        )
     }
 
     private var bottomControls: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
+        VStack(spacing: 22) {
+            Text(formattedCallDuration(elapsedSeconds))
+                .font(.system(size: 34, weight: .black, design: .rounded).monospacedDigit())
+                .foregroundStyle(PetPalTheme.ink)
+                .accessibilityLabel("通话时长 \(formattedCallDurationForAccessibility(elapsedSeconds))")
 
-            VStack(spacing: 22) {
-                Text(formattedCallDuration(elapsedSeconds))
-                    .font(.system(size: 34, weight: .black, design: .rounded).monospacedDigit())
-                    .foregroundStyle(PetPalTheme.ink)
-                    .accessibilityLabel("通话时长 \(formattedCallDurationForAccessibility(elapsedSeconds))")
+            Text("通话连接稳定，监控画面已同步")
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(PetPalTheme.inkSoft)
 
-                Text("通话连接稳定，监控画面已同步")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(PetPalTheme.inkSoft)
+            HStack(alignment: .top, spacing: 24) {
+                VoiceCallActionButton(
+                    title: "静音",
+                    systemImage: isMuted ? "mic.slash.fill" : "mic.fill",
+                    accentColor: Color(hex: "F0B98B"),
+                    isActive: isMuted,
+                    statusText: isMuted ? "已开启" : "已关闭",
+                    accessibilityLabel: "静音，\(isMuted ? "已开启" : "已关闭")"
+                ) {
+                    isMuted.toggle()
+                }
 
-                HStack(alignment: .top, spacing: 24) {
-                    VoiceCallActionButton(
-                        title: "静音",
-                        systemImage: isMuted ? "mic.slash.fill" : "mic.fill",
-                        accentColor: Color(hex: "F0B98B"),
-                        isActive: isMuted,
-                        statusText: isMuted ? "已开启" : "已关闭",
-                        accessibilityLabel: "静音，\(isMuted ? "已开启" : "已关闭")"
-                    ) {
-                        isMuted.toggle()
-                    }
-
-                    VStack(spacing: 10) {
-                        Button {
-                            dismiss()
-                        } label: {
-                            Image(systemName: "phone.down.fill")
-                                .font(.system(size: 22, weight: .black))
-                                .foregroundStyle(.white)
-                                .frame(width: 74, height: 74)
-                                .background(
-                                    LinearGradient(
-                                        colors: [Color(hex: "E77964"), Color(hex: "CF6A5A")],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
+                VStack(spacing: 10) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "phone.down.fill")
+                            .font(.system(size: 22, weight: .black))
+                            .foregroundStyle(.white)
+                            .frame(width: 74, height: 74)
+                            .background(
+                                LinearGradient(
+                                    colors: [Color(hex: "E77964"), Color(hex: "CF6A5A")],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
                                 )
-                                .clipShape(Circle())
-                                .shadow(color: Color(hex: "A83D37").opacity(0.36), radius: 18, y: 10)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("挂断通话")
-
-                        Text("挂断")
-                            .font(.system(size: 13, weight: .black, design: .rounded))
-                            .foregroundStyle(PetPalTheme.ink)
+                            )
+                            .clipShape(Circle())
+                            .shadow(color: Color(hex: "A83D37").opacity(0.36), radius: 18, y: 10)
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("挂断通话")
 
-                    VoiceCallActionButton(
-                        title: "免提",
-                        systemImage: isSpeakerOn ? "speaker.wave.3.fill" : "speaker.slash.fill",
-                        accentColor: Color(hex: "9CD4C8"),
-                        isActive: isSpeakerOn,
-                        statusText: isSpeakerOn ? "已开启" : "已关闭",
-                        accessibilityLabel: "免提，\(isSpeakerOn ? "已开启" : "已关闭")"
-                    ) {
-                        isSpeakerOn.toggle()
-                    }
+                    Text("挂断")
+                        .font(.system(size: 13, weight: .black, design: .rounded))
+                        .foregroundStyle(PetPalTheme.ink)
+                }
+
+                VoiceCallActionButton(
+                    title: "免提",
+                    systemImage: isSpeakerOn ? "speaker.wave.3.fill" : "speaker.slash.fill",
+                    accentColor: Color(hex: "9CD4C8"),
+                    isActive: isSpeakerOn,
+                    statusText: isSpeakerOn ? "已开启" : "已关闭",
+                    accessibilityLabel: "免提，\(isSpeakerOn ? "已开启" : "已关闭")"
+                ) {
+                    isSpeakerOn.toggle()
                 }
             }
-            .padding(.horizontal, 26)
-            .padding(.top, 24)
-            .padding(.bottom, 32)
-            .background(
-                RoundedRectangle(cornerRadius: 36, style: .continuous)
-                    .fill(Color(hex: "FFF8EF").opacity(0.94))
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 36, style: .continuous))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 36, style: .continuous)
-                    .stroke(Color.white.opacity(0.46), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.18), radius: 28, y: 14)
-            .padding(.horizontal, 14)
-            .safeAreaPadding(.bottom, 10)
-            .offset(y: controlsAreVisible ? 0 : 28)
-            .opacity(controlsAreVisible ? 1 : 0)
         }
+        .padding(.horizontal, 26)
+        .padding(.top, 24)
+        .padding(.bottom, 32)
+        .background(
+            RoundedRectangle(cornerRadius: 36, style: .continuous)
+                .fill(Color(hex: "FFF8EF").opacity(0.94))
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 36, style: .continuous))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 36, style: .continuous)
+                .stroke(Color.white.opacity(0.46), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.18), radius: 28, y: 14)
+        .offset(y: controlsAreVisible ? 0 : 28)
+        .opacity(controlsAreVisible ? 1 : 0)
     }
 
     private var liveBadge: some View {
@@ -2362,31 +2319,6 @@ private struct VoiceCallMockMonitorView: View {
                 .fill(Color(hex: "FFF9F2").opacity(0.16))
                 .frame(width: 132, height: 82)
                 .offset(x: 92, y: 8)
-
-            VStack(spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: "video.fill")
-                        .font(.system(size: 14, weight: .black))
-                    Text("实时监控模拟画面")
-                        .font(.system(size: 14, weight: .black, design: .rounded))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(Color.black.opacity(0.24))
-                .clipShape(Capsule())
-
-                Text(cameraName)
-                    .font(.system(size: 24, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-
-                Text("未检测到今日视频，先以陪伴摄像头 mock 画面代替。")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.76))
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(3)
-                    .padding(.horizontal, 32)
-            }
 
             VStack(spacing: 18) {
                 ForEach(0..<7, id: \.self) { _ in

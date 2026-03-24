@@ -53,12 +53,26 @@ class VocalizationCandidateTests(unittest.TestCase):
 
 
 class FfmpegResolutionTests(unittest.TestCase):
-    @patch("video_processor.shutil.which", side_effect=["/usr/local/bin/ffmpeg"])
+    @patch(
+        "video_processor.shutil.which",
+        side_effect=lambda candidate: "/usr/local/bin/ffmpeg" if candidate == "ffmpeg" else None,
+    )
     def test_get_ffmpeg_executable_uses_system_ffmpeg_when_available(self, mock_which):
         executable = video_processor._get_ffmpeg_executable()
 
         self.assertEqual(executable, "/usr/local/bin/ffmpeg")
         mock_which.assert_called_once_with("ffmpeg")
+
+    @patch(
+        "video_processor.shutil.which",
+        side_effect=lambda candidate: "/opt/homebrew/bin/ffmpeg"
+        if candidate == "/opt/homebrew/bin/ffmpeg"
+        else None,
+    )
+    def test_get_ffmpeg_executable_uses_common_homebrew_path_when_path_missing(self, _mock_which):
+        executable = video_processor._get_ffmpeg_executable()
+
+        self.assertEqual(executable, "/opt/homebrew/bin/ffmpeg")
 
     @patch("video_processor.importlib.import_module", side_effect=ImportError)
     @patch("video_processor.shutil.which", return_value=None)
@@ -68,6 +82,23 @@ class FfmpegResolutionTests(unittest.TestCase):
         _mock_import_module,
     ):
         with self.assertRaisesRegex(RuntimeError, "未找到可用的 ffmpeg"):
+            video_processor._get_ffmpeg_executable()
+
+    @patch("video_processor.shutil.which", return_value=None)
+    @patch("video_processor.importlib.import_module")
+    def test_get_ffmpeg_executable_raises_actionable_error_when_imageio_binary_missing(
+        self,
+        mock_import_module,
+        _mock_which,
+    ):
+        class FakeImageioFfmpeg:
+            @staticmethod
+            def get_ffmpeg_exe():
+                raise RuntimeError("No ffmpeg exe could be found")
+
+        mock_import_module.return_value = FakeImageioFfmpeg()
+
+        with self.assertRaisesRegex(RuntimeError, "brew install ffmpeg"):
             video_processor._get_ffmpeg_executable()
 
 

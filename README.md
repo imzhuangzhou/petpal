@@ -67,6 +67,7 @@ PetPal 是一个端到端的 AI 宠物陪伴应用，包含 **iOS 客户端**（
 
 - **Python 3.10+**
 - **Xcode 15+**（含 iOS 17 Simulator）
+- **ffmpeg**（必需，用于音频提取与视频裁剪；macOS 可执行 `brew install ffmpeg`）
 - **阿里云 DashScope API Key**（必需，视频分析、对话、日报、日记等功能均依赖它）
 - **Google Cloud / Vertex AI 凭据**（可选，不设则宠物头像生成功能不可用）
 

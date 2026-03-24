@@ -62,6 +62,16 @@ _STAGE_DIRECTION_KEYWORDS = (
     "瞥", "盯", "蹭", "扑", "跳上", "伸懒腰", "伸个懒腰", "懒腰", "打哈欠", "嘟囔",
     "小声", "轻轻", "悄悄", "慢悠悠", "发呆", "抖", "摇尾巴", "舔爪", "看你", "看向你",
 )
+_IMMEDIATE_FOCUS_KEYWORDS = (
+    "刚刚", "刚才", "现在", "这会儿", "此刻", "眼下", "目前", "上一段", "刚那段",
+    "门口", "客厅", "沙发", "窗边", "窗台", "水碗", "食盆", "饭盆", "哪儿", "哪里",
+)
+_HISTORICAL_FOCUS_KEYWORDS = (
+    "平时", "一般", "一贯", "总是", "经常", "往常", "一直", "以前", "最近几天", "这几天",
+)
+_DAILY_FOCUS_KEYWORDS = (
+    "今天", "上午", "中午", "下午", "晚上", "今早", "今晚",
+)
 
 
 def _is_display_risky_char(char: str) -> bool:
@@ -193,6 +203,9 @@ def _compute_stats_from_daily_counts(daily_counts: dict, fallback_stats: dict) -
     except (TypeError, ValueError):
         waiting_count = 0
 
+    if not action_counts and waiting_count == 0:
+        return fallback_stats
+
     return {
         "eating": count_matching("吃", "eat", "meal", "food"),
         "drinking": count_matching("喝", "饮", "drink", "water"),
@@ -245,7 +258,30 @@ def get_cached_event_context(pet_id: int) -> tuple[str, dict, list]:
     return summary, stats, events
 
 
-def build_system_prompt(pet: dict, today_events: list) -> str:
+def _infer_memory_focus(user_message: str) -> str:
+    normalized = str(user_message or "").strip().lower()
+    if not normalized:
+        return "balanced"
+    if any(keyword in normalized for keyword in _HISTORICAL_FOCUS_KEYWORDS):
+        return "historical"
+    if any(keyword in normalized for keyword in _IMMEDIATE_FOCUS_KEYWORDS):
+        return "immediate"
+    if any(keyword in normalized for keyword in _DAILY_FOCUS_KEYWORDS):
+        return "daily"
+    return "balanced"
+
+
+def _memory_focus_instruction(memory_focus: str) -> str:
+    if memory_focus == "immediate":
+        return "这轮问题更偏当下，请优先依据最近片段细节来回答位置、动作、陪伴和状态；若多个片段冲突，优先更近的一条。"
+    if memory_focus == "historical":
+        return "这轮问题更偏长期习惯，请优先参考长期画像和近期变化，再用最近片段做补充，不要把一次偶发情况说成稳定习惯。"
+    if memory_focus == "daily":
+        return "这轮问题更偏今天整体，请优先综合今日记忆和今日统计来回答，不要被单个片段过度带偏。"
+    return "这轮问题没有明显时间偏向，请按最近片段、今日记忆和长期画像的事实优先级自然回答。"
+
+
+def build_system_prompt(pet: dict, today_events: list, memory_focus: str = "balanced") -> str:
     """Build the system prompt with pet persona and today's event context."""
     style = pet.get("language_style", "tsundere")
     style_config = STYLE_PRESETS.get(style, STYLE_PRESETS["tsundere"])
@@ -264,11 +300,19 @@ def build_system_prompt(pet: dict, today_events: list) -> str:
     memory_context = build_memory_prompt_context(pet_id)
     stats = _compute_stats_from_daily_counts(memory_context.get("daily_counts", {}), fallback_stats)
     daily_summary = (memory_context.get("daily_summary") or "").strip() or event_summary
+    recent_detail_lines = memory_context.get("immediate_clip_lines", [])
     recent_clip_lines = memory_context.get("recent_clip_lines", [])
-    recent_clip_text = "\n".join(recent_clip_lines[:5]) if recent_clip_lines else "暂无最近片段记忆。"
+    if memory_focus == "immediate":
+        recent_memory_title = "=== 即时片段细节 ==="
+        recent_clip_text = "\n".join(recent_detail_lines[:3]) if recent_detail_lines else "暂无最近片段细节。"
+    else:
+        recent_memory_title = "=== 最近片段记忆 ==="
+        recent_clip_text = "\n".join(recent_clip_lines[:5]) if recent_clip_lines else "暂无最近片段记忆。"
     profile_lines = memory_context.get("profile_lines", [])
     profile_text = "\n".join(profile_lines[:8]) if profile_lines else "暂无稳定长期画像。"
     health_flag_text = _render_health_flag_lines(memory_context.get("health_flags", []))
+    baseline_summary = (memory_context.get("baseline_summary") or "").strip() or "暂无明显近期变化。"
+    focus_instruction = _memory_focus_instruction(memory_focus)
 
     if owner_alias:
         owner_reference = f"你的主人希望你称呼 TA 为“{owner_alias}”。"
@@ -283,11 +327,17 @@ def build_system_prompt(pet: dict, today_events: list) -> str:
 你是一只{breed_or_species}，名字叫{pet["name"]}。
 {owner_reference}
 
-=== 最近片段记忆 ===
+=== 本轮回答策略 ===
+{focus_instruction}
+
+{recent_memory_title}
 {recent_clip_text}
 
 === 今日综合记忆 ===
 {daily_summary}
+
+=== 近期变化 ===
+{baseline_summary}
 
 === 长期画像 ===
 {profile_text}
@@ -296,11 +346,11 @@ def build_system_prompt(pet: dict, today_events: list) -> str:
 {health_flag_text}
 
 === 今日统计 ===
-- 进食次数：{stats['eating']} 次
-- 饮水次数：{stats['drinking']} 次
-- 睡觉次数：{stats['sleeping']} 次
-- 玩耍次数：{stats['playing']} 次
-- 在门口等候次数：{stats['waiting']} 次
+- 进食次数：{stats.get('eating', 0)} 次
+- 饮水次数：{stats.get('drinking', 0)} 次
+- 睡觉次数：{stats.get('sleeping', 0)} 次
+- 玩耍次数：{stats.get('playing', 0)} 次
+- 在门口等候次数：{stats.get('waiting', 0)} 次
 
 === 对话规则 ===
 1. 始终保持你的宠物人设，用第一人称说话
@@ -323,7 +373,8 @@ def _prepare_chat_context(pet_id: int, user_message: str):
     if not pet:
         return None, None, None
 
-    system_prompt = build_system_prompt(pet, [])
+    memory_focus = _infer_memory_focus(user_message)
+    system_prompt = build_system_prompt(pet, [], memory_focus=memory_focus)
 
     history = query_db(
         "SELECT role, content FROM chat_history WHERE pet_id = ? ORDER BY created_at DESC LIMIT 20",

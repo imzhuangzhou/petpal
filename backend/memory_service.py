@@ -178,6 +178,87 @@ def _first_action_label(actions: list) -> str:
     return ""
 
 
+def _first_hypothesis_label(payload: dict) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    label = _normalize_text(payload.get("label") or payload.get("primary") or payload.get("name"))
+    if label.lower() == "unknown":
+        return ""
+    return label
+
+
+def _humanize_zone_label(value: Any) -> str:
+    zone = _normalize_text(value)
+    if not zone:
+        return ""
+    zone_map = {
+        "door": "门口",
+        "entry": "门口",
+        "entrance": "门口",
+        "food": "食盆附近",
+        "food_area": "食盆附近",
+        "feeder": "喂食器附近",
+        "bowl_food": "食盆附近",
+        "water": "水碗附近",
+        "water_area": "水碗附近",
+        "water_bowl": "水碗附近",
+        "drinking_fountain": "饮水器附近",
+        "sofa": "沙发旁",
+        "couch": "沙发旁",
+        "window": "窗边",
+        "windowsill": "窗边",
+        "cat_tree": "猫爬架旁",
+        "bed": "床边",
+        "crate": "窝里",
+        "litter_box": "猫砂盆附近",
+    }
+    return zone_map.get(zone.lower(), zone)
+
+
+def _format_recent_clip_detail_line(clip: dict) -> str:
+    start_seconds = clip.get("source_video_start_seconds", 0) or 0
+    end_seconds = clip.get("source_video_end_seconds", 0) or 0
+    summary = _normalize_text(clip.get("summary")) or "记录到一段宠物片段。"
+    details = []
+
+    action = _first_action_label(clip.get("actions", []))
+    if action:
+        details.append(f"动作：{action}")
+
+    zone = _humanize_zone_label(
+        clip.get("environment", {}).get("zone_guess")
+        or clip.get("environment", {}).get("primary_zone")
+        or clip.get("environment", {}).get("location")
+    )
+    if zone:
+        details.append(f"位置：{zone}")
+
+    mood = _first_hypothesis_label(clip.get("mood_hypothesis", {}))
+    if mood:
+        details.append(f"情绪猜测：{mood}")
+
+    intent = _first_hypothesis_label(clip.get("intent_hypothesis", {}))
+    if intent:
+        details.append(f"意图猜测：{intent}")
+
+    interaction = clip.get("interaction", {})
+    if interaction.get("contains_person") or interaction.get("people"):
+        details.append("陪伴：有人在场")
+
+    health_labels = []
+    for flag in clip.get("health_signals", [])[:2]:
+        if not isinstance(flag, dict):
+            continue
+        title = _normalize_text(flag.get("title") or flag.get("label") or flag.get("name"))
+        if title:
+            health_labels.append(title)
+    if health_labels:
+        details.append(f"健康提示：{'、'.join(health_labels)}")
+
+    detail_text = f"；{'；'.join(details)}" if details else ""
+    return f"- {start_seconds:.1f}s-{end_seconds:.1f}s：{summary}{detail_text}"
+
+
 def _extract_waiting_metrics(clips: list[dict]) -> tuple[int, float]:
     waiting_count = 0
     waiting_seconds = 0.0
@@ -643,20 +724,26 @@ def build_memory_prompt_context(pet_id: int, clip_limit: int = 5) -> dict:
     active_profiles = get_profile_memories(pet_id, status="active")
 
     clip_lines = []
+    immediate_clip_lines = []
     for clip in recent_clips:
         start_seconds = clip.get("source_video_start_seconds", 0) or 0
         end_seconds = clip.get("source_video_end_seconds", 0) or 0
         clip_lines.append(
             f"- {start_seconds:.1f}s-{end_seconds:.1f}s：{clip.get('summary', '')}"
         )
+        immediate_clip_lines.append(_format_recent_clip_detail_line(clip))
 
     daily_text = ""
     daily_counts = {}
     health_flags = []
+    baseline_summary = ""
     if daily_memory:
         daily_text = daily_memory.get("daily_summary", "")
         daily_counts = daily_memory.get("activity_counts", {})
         health_flags = daily_memory.get("health_flags", [])
+        change_vs_recent = daily_memory.get("change_vs_recent_baseline", {})
+        if isinstance(change_vs_recent, dict):
+            baseline_summary = _normalize_text(change_vs_recent.get("summary"))
 
     profile_lines = []
     for memory in active_profiles[:8]:
@@ -666,9 +753,11 @@ def build_memory_prompt_context(pet_id: int, clip_limit: int = 5) -> dict:
 
     return {
         "recent_clip_lines": clip_lines,
+        "immediate_clip_lines": immediate_clip_lines,
         "daily_memory": daily_memory,
         "daily_summary": daily_text,
         "daily_counts": daily_counts,
         "health_flags": health_flags,
+        "baseline_summary": baseline_summary,
         "profile_lines": profile_lines,
     }

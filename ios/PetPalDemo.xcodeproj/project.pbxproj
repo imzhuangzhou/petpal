@@ -43,6 +43,7 @@
 		A10000030000000000000002 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000030000000000000002 /* Assets.xcassets */; };
 		A10000030000000000000003 /* ezviz-living-room-demo.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = A20000030000000000000003 /* ezviz-living-room-demo.mp4 */; };
 		A10000030000000000000004 /* petpal-dog-demo.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = A20000030000000000000004 /* petpal-dog-demo.mp4 */; };
+		A10000040000000000000001 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A20000040000000000000001 /* LaunchScreen.storyboard */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -84,6 +85,7 @@
 		A20000030000000000000002 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A20000030000000000000003 /* ezviz-living-room-demo.mp4 */ = {isa = PBXFileReference; lastKnownFileType = video.mp4; path = "ezviz-living-room-demo.mp4"; sourceTree = "<group>"; };
 		A20000030000000000000004 /* petpal-dog-demo.mp4 */ = {isa = PBXFileReference; lastKnownFileType = video.mp4; path = "petpal-dog-demo.mp4"; sourceTree = "<group>"; };
+		A20000040000000000000001 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -161,6 +163,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000030000000000000002 /* Assets.xcassets */,
+				A20000040000000000000001 /* LaunchScreen.storyboard */,
 				A40000010000000000000011 /* DemoVideos */,
 				A2000001000000000000000D /* Info.plist */,
 			);
@@ -328,6 +331,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000030000000000000002 /* Assets.xcassets in Resources */,
+				A10000040000000000000001 /* LaunchScreen.storyboard in Resources */,
 				A10000030000000000000003 /* ezviz-living-room-demo.mp4 in Resources */,
 				A10000030000000000000004 /* petpal-dog-demo.mp4 in Resources */,
 			);

@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from database import init_db
+from range_static_files import RangeAwareStaticFiles
 from routes.user import router as user_router
 from routes.chat import router as chat_router
 from routes.features import router as features_router
@@ -42,7 +43,7 @@ app.mount("/frames", StaticFiles(directory=FRAMES_DIR), name="frames")
 
 UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
-app.mount("/media", StaticFiles(directory=UPLOADS_DIR), name="media")
+app.mount("/media", RangeAwareStaticFiles(directory=UPLOADS_DIR), name="media")
 
 # Include routers
 app.include_router(user_router)

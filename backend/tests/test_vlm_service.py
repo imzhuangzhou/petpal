@@ -40,6 +40,18 @@ class _AttrObject:
         self.__dict__.update(kwargs)
 
 
+def _fake_dashscope_response(content: str):
+    return _AttrObject(
+        choices=[
+            _AttrObject(
+                message=_AttrObject(
+                    content=content,
+                )
+            )
+        ]
+    )
+
+
 class FakeHttpOptions(_AttrObject):
     pass
 
@@ -246,6 +258,81 @@ class IdentityExtractionTests(unittest.TestCase):
             )
 
         self.assertEqual(summary, "")
+
+
+class ClipMemoryAnalysisTests(unittest.TestCase):
+    def test_analyze_clip_memory_uses_video_input_even_when_size_check_would_fail_before(self):
+        response = _fake_dashscope_response(
+            '{"clip_summary":"小狗在客厅里玩耍","actions":[{"label":"playing","confidence":0.9}],"body_state":{"state":"active"},"appearance":{},"companions":{},"environment":{},"mood_hypothesis":{},"intent_hypothesis":{},"health_signals":[],"novelty_signals":[],"evidence":{},"confidence":{}}'
+        )
+
+        with patch("vlm_service.os.path.getsize", side_effect=AssertionError("should not be used")), patch(
+            "vlm_service.encode_file_base64",
+            return_value="video-base64",
+        ) as mock_encode_video, patch(
+            "vlm_service._run_dashscope_completion",
+            return_value=response,
+        ) as mock_completion:
+            payload = vlm_service.analyze_clip_memory("/tmp/demo.mp4", frame_paths=["/tmp/frame.jpg"])
+
+        self.assertEqual(payload["clip_summary"], "小狗在客厅里玩耍")
+        self.assertEqual(payload["confidence"]["input_mode"], "video")
+        mock_encode_video.assert_called_once_with("/tmp/demo.mp4")
+        self.assertEqual(mock_completion.call_count, 1)
+
+    def test_analyze_clip_memory_retries_video_twice_before_succeeding(self):
+        response = _fake_dashscope_response(
+            '{"clip_summary":"第三次视频分析成功","actions":[],"body_state":{},"appearance":{},"companions":{},"environment":{},"mood_hypothesis":{},"intent_hypothesis":{},"health_signals":[],"novelty_signals":[],"evidence":{},"confidence":{}}'
+        )
+
+        with patch(
+            "vlm_service.encode_file_base64",
+            return_value="video-base64",
+        ) as mock_encode_video, patch(
+            "vlm_service._run_dashscope_completion",
+            side_effect=[RuntimeError("attempt-1"), RuntimeError("attempt-2"), response],
+        ) as mock_completion:
+            payload = vlm_service.analyze_clip_memory("/tmp/demo.mp4", frame_paths=["/tmp/frame.jpg"])
+
+        self.assertEqual(payload["clip_summary"], "第三次视频分析成功")
+        self.assertEqual(payload["confidence"]["input_mode"], "video")
+        self.assertEqual(mock_encode_video.call_count, 3)
+        self.assertEqual(mock_completion.call_count, 3)
+
+    def test_analyze_clip_memory_falls_back_to_frames_after_three_video_failures(self):
+        frame_response = _fake_dashscope_response(
+            '{"clip_summary":"改为根据关键帧分析","actions":[{"label":"resting","confidence":0.6}],"body_state":{"state":"resting"},"appearance":{},"companions":{},"environment":{},"mood_hypothesis":{},"intent_hypothesis":{},"health_signals":[],"novelty_signals":[],"evidence":{},"confidence":{}}'
+        )
+
+        with patch(
+            "vlm_service.encode_file_base64",
+            return_value="video-base64",
+        ) as mock_encode_video, patch(
+            "vlm_service.encode_image_base64",
+            return_value="frame-base64",
+        ) as mock_encode_image, patch(
+            "vlm_service._run_dashscope_completion",
+            side_effect=[
+                RuntimeError("attempt-1"),
+                RuntimeError("attempt-2"),
+                RuntimeError("attempt-3"),
+                frame_response,
+            ],
+        ) as mock_completion:
+            payload = vlm_service.analyze_clip_memory(
+                "/tmp/demo.mp4",
+                frame_paths=["/tmp/frame-1.jpg", "/tmp/frame-2.jpg"],
+            )
+
+        self.assertEqual(payload["clip_summary"], "改为根据关键帧分析")
+        self.assertEqual(payload["confidence"]["input_mode"], "frames")
+        self.assertEqual(mock_encode_video.call_count, 3)
+        self.assertEqual(mock_encode_image.call_count, 2)
+        self.assertEqual(mock_completion.call_count, 4)
+        self.assertEqual(mock_completion.call_args_list[0].kwargs["operation"], "视频片段结构化分析")
+        self.assertEqual(mock_completion.call_args_list[1].kwargs["operation"], "视频片段结构化分析")
+        self.assertEqual(mock_completion.call_args_list[2].kwargs["operation"], "视频片段结构化分析")
+        self.assertEqual(mock_completion.call_args_list[3].kwargs["operation"], "视频片段关键帧结构化分析")
 
 
 class GeneratePetAvatarTests(unittest.TestCase):

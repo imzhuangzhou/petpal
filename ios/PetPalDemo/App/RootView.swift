@@ -704,16 +704,12 @@ struct PetPalChatHeader: View {
     private var statusCarouselLine: some View {
         if statusLines.count == 1, let line = statusLines.first {
             statusText(line)
-        } else if accessibilityReduceMotion {
-            TimelineView(.periodic(from: statusRotationStartDate, by: statusRotationInterval)) { context in
-                statusText(statusLines[currentStatusIndex(for: context.date)])
-            }
         } else {
-            TimelineView(.periodic(from: statusRotationStartDate, by: 0.14)) { context in
-                let index = currentStatusIndex(for: context.date)
-                let emphasis = currentStatusEmphasis(for: context.date)
-
-                statusText(statusLines[index], emphasis: emphasis)
+            TimelineView(.periodic(from: statusRotationStartDate, by: statusRotationInterval)) { context in
+                statusText(
+                    statusLines[currentStatusIndex(for: context.date)],
+                    emphasis: accessibilityReduceMotion ? 1 : 0.96
+                )
             }
         }
     }
@@ -736,13 +732,6 @@ struct PetPalChatHeader: View {
         let elapsed = max(0, date.timeIntervalSince(statusRotationStartDate))
         let step = Int(elapsed / statusRotationInterval)
         return step % statusLines.count
-    }
-
-    private func currentStatusEmphasis(for date: Date) -> Double {
-        let elapsed = max(0, date.timeIntervalSince(statusRotationStartDate))
-        let cycleProgress = elapsed.truncatingRemainder(dividingBy: statusRotationInterval)
-        let ramp = min(cycleProgress / 0.42, 1)
-        return 1 - pow(1 - ramp, 3)
     }
 }
 

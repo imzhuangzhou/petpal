@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="24125" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="01J-lp-oVM">
+    <device id="retina6_12" orientation="portrait" appearance="light"/>
+    <dependencies>
+        <deployment identifier="iOS"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="24125"/>
+        <capability name="Safe area layout guides" minToolsVersion="9.0"/>
+        <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
+    </dependencies>
+    <scenes>
+        <!--View Controller-->
+        <scene sceneID="EHf-IW-A2E">
+            <objects>
+                <viewController id="01J-lp-oVM" sceneMemberID="viewController">
+                    <view key="view" contentMode="scaleToFill" id="Ze5-6b-2t3">
+                        <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
+                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                        <subviews>
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="WelcomeAppIcon" translatesAutoresizingMaskIntoConstraints="NO" id="fEK-qU-y47">
+                                <rect key="frame" x="140.5" y="298" width="112" height="112"/>
+                                <constraints>
+                                    <constraint firstAttribute="width" constant="112" id="0fF-oX-rNW"/>
+                                    <constraint firstAttribute="height" constant="112" id="bg1-zm-p9p"/>
+                                </constraints>
+                            </imageView>
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" text="PetPal" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="KQy-rz-hh0">
+                                <rect key="frame" x="126.5" y="428" width="140" height="41"/>
+                                <fontDescription key="fontDescription" type="system" weight="heavy" pointSize="34"/>
+                                <color key="textColor" red="0.3019607843" green="0.2274509804" blue="0.1921568627" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                                <nil key="highlightedColor"/>
+                            </label>
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" text="每一帧，都是它想对你说的话" textAlignment="center" lineBreakMode="wordWrap" numberOfLines="2" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="mfr-5T-FyV">
+                                <rect key="frame" x="64" y="479" width="265" height="42"/>
+                                <fontDescription key="fontDescription" type="system" weight="medium" pointSize="17"/>
+                                <color key="textColor" red="0.4862745098" green="0.4039215686" blue="0.3647058824" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                                <nil key="highlightedColor"/>
+                            </label>
+                        </subviews>
+                        <viewLayoutGuide key="safeArea" id="Bcu-3y-fUS"/>
+                        <color key="backgroundColor" red="1" green="0.9725490196" blue="0.9333333333" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                        <constraints>
+                            <constraint firstItem="mfr-5T-FyV" firstAttribute="top" secondItem="KQy-rz-hh0" secondAttribute="bottom" constant="10" id="2d4-K8-vL3"/>
+                            <constraint firstItem="KQy-rz-hh0" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="70T-Zj-6rJ"/>
+                            <constraint firstItem="fEK-qU-y47" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="8Rf-iX-K8W"/>
+                            <constraint firstItem="fEK-qU-y47" firstAttribute="centerY" secondItem="Bcu-3y-fUS" secondAttribute="centerY" constant="-72" id="E9a-5y-Bab"/>
+                            <constraint firstItem="mfr-5T-FyV" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="Tu6-8n-ux5"/>
+                            <constraint firstItem="mfr-5T-FyV" firstAttribute="leading" relation="greaterThanOrEqual" secondItem="Bcu-3y-fUS" secondAttribute="leading" constant="28" id="cSz-Xx-H6Q"/>
+                            <constraint firstItem="KQy-rz-hh0" firstAttribute="top" secondItem="fEK-qU-y47" secondAttribute="bottom" constant="18" id="nQw-vW-vKG"/>
+                            <constraint firstItem="Bcu-3y-fUS" firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="mfr-5T-FyV" secondAttribute="trailing" constant="28" id="uRk-y3-5kN"/>
+                        </constraints>
+                    </view>
+                </viewController>
+                <placeholder placeholderIdentifier="IBFirstResponder" id="iYj-Kq-Ea1" userLabel="First Responder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="52.671755725190835" y="374.64788732394368"/>
+        </scene>
+    </scenes>
+    <resources>
+        <image name="WelcomeAppIcon" width="1024" height="1024"/>
+    </resources>
+</document>
