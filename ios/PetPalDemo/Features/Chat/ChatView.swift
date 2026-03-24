@@ -1966,6 +1966,8 @@ private struct PetPalVoiceCallView: View {
 
     var body: some View {
         GeometryReader { proxy in
+            let topSectionPadding = max(proxy.safeAreaInsets.top, 20) + 16
+
             ZStack {
                 voiceCallBackground
                     .ignoresSafeArea()
@@ -1974,7 +1976,7 @@ private struct PetPalVoiceCallView: View {
                     monitorStage
                         .frame(maxWidth: 520)
                         .padding(.horizontal, 14)
-                        .padding(.top, 12)
+                        .padding(.top, topSectionPadding)
                     Spacer(minLength: 0)
                 }
 
@@ -2029,6 +2031,14 @@ private struct PetPalVoiceCallView: View {
     }
 
     private var monitorStage: some View {
+        VStack(spacing: 14) {
+            monitorTopOverlay
+
+            monitorVideoSurface
+        }
+    }
+
+    private var monitorVideoSurface: some View {
         ZStack {
             Group {
                 if let previewURL {
@@ -2050,11 +2060,6 @@ private struct PetPalVoiceCallView: View {
                     .stroke(Color.white.opacity(0.14), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.28), radius: 24, y: 14)
-            .overlay(alignment: .top) {
-                monitorTopOverlay
-                    .padding(.horizontal, 18)
-                    .padding(.top, 18)
-            }
             .overlay(alignment: .bottomLeading) {
                 monitorBottomOverlay
                     .padding(.horizontal, 24)
