@@ -12,6 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Uploa
 from database import execute_db, query_db
 from dialogue_engine import invalidate_event_cache
 from video_analysis_service import (
+    build_clip_debug_payload,
     build_debug_payload,
     build_memory_debug_payload,
     create_video_analysis_job,
@@ -658,6 +659,14 @@ def get_video_analysis_debug(camera_id: int):
     payload = build_debug_payload(camera_id)
     if not payload:
         raise HTTPException(status_code=404, detail="Camera not found")
+    return payload
+
+
+@router.get("/debug/video-analysis/clips/{clip_id}")
+def get_video_analysis_clip_debug(clip_id: int):
+    payload = build_clip_debug_payload(clip_id)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Clip not found")
     return payload
 
 

@@ -111,6 +111,10 @@ final class APIClient {
         try await fetch(endpoint: Endpoint(path: "/api/debug/video-analysis/\(cameraID)"))
     }
 
+    func fetchVideoAnalysisClipDetail(clipID: Int) async throws -> VideoAnalysisCandidateClipDetailResponse {
+        try await fetch(endpoint: Endpoint(path: "/api/debug/video-analysis/clips/\(clipID)"))
+    }
+
     func fetchEventClip(eventID: Int) async throws -> EventClipResponse {
         try await fetch(endpoint: Endpoint(path: "/api/events/\(eventID)/clip"))
     }
@@ -457,6 +461,116 @@ struct VideoAnalysisCandidateClip: Decodable, Sendable, Hashable, Identifiable {
         case analysisStatus = "analysis_status"
         case summary
         case eventType = "event_type"
+    }
+}
+
+enum DebugJSONValue: Decodable, Sendable, Hashable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case object([String: DebugJSONValue])
+    case array([DebugJSONValue])
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+
+        if container.decodeNil() {
+            self = .null
+        } else if let boolValue = try? container.decode(Bool.self) {
+            self = .bool(boolValue)
+        } else if let intValue = try? container.decode(Int.self) {
+            self = .number(Double(intValue))
+        } else if let doubleValue = try? container.decode(Double.self) {
+            self = .number(doubleValue)
+        } else if let stringValue = try? container.decode(String.self) {
+            self = .string(stringValue)
+        } else if let objectValue = try? container.decode([String: DebugJSONValue].self) {
+            self = .object(objectValue)
+        } else if let arrayValue = try? container.decode([DebugJSONValue].self) {
+            self = .array(arrayValue)
+        } else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported JSON value")
+        }
+    }
+}
+
+struct VideoAnalysisCandidateClipDetailResponse: Decodable, Sendable, Hashable {
+    let id: Int
+    let sequence: Int
+    let ruleID: String
+    let primaryRule: String
+    let secondaryRules: [String]
+    let clipURL: String
+    let thumbnailURL: String
+    let startSeconds: Double
+    let endSeconds: Double
+    let analysisStatus: String
+    let eventType: String
+    let summary: String
+    let actions: [DebugJSONValue]
+    let bodyState: DebugJSONValue
+    let appearance: DebugJSONValue
+    let companions: DebugJSONValue
+    let environment: DebugJSONValue
+    let moodHypothesis: DebugJSONValue
+    let intentHypothesis: DebugJSONValue
+    let healthSignals: [DebugJSONValue]
+    let noveltySignals: [DebugJSONValue]
+    let evidence: DebugJSONValue
+    let confidence: DebugJSONValue
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case sequence
+        case ruleID = "rule_id"
+        case primaryRule = "primary_rule"
+        case secondaryRules = "secondary_rules"
+        case clipURL = "clip_url"
+        case thumbnailURL = "thumbnail_url"
+        case startSeconds = "start_seconds"
+        case endSeconds = "end_seconds"
+        case analysisStatus = "analysis_status"
+        case eventType = "event_type"
+        case summary
+        case actions
+        case bodyState = "body_state"
+        case appearance
+        case companions
+        case environment
+        case moodHypothesis = "mood_hypothesis"
+        case intentHypothesis = "intent_hypothesis"
+        case healthSignals = "health_signals"
+        case noveltySignals = "novelty_signals"
+        case evidence
+        case confidence
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        sequence = try container.decodeIfPresent(Int.self, forKey: .sequence) ?? 0
+        ruleID = try container.decodeIfPresent(String.self, forKey: .ruleID) ?? ""
+        primaryRule = try container.decodeIfPresent(String.self, forKey: .primaryRule) ?? ""
+        secondaryRules = try container.decodeIfPresent([String].self, forKey: .secondaryRules) ?? []
+        clipURL = try container.decodeIfPresent(String.self, forKey: .clipURL) ?? ""
+        thumbnailURL = try container.decodeIfPresent(String.self, forKey: .thumbnailURL) ?? ""
+        startSeconds = try container.decodeIfPresent(Double.self, forKey: .startSeconds) ?? 0
+        endSeconds = try container.decodeIfPresent(Double.self, forKey: .endSeconds) ?? 0
+        analysisStatus = try container.decodeIfPresent(String.self, forKey: .analysisStatus) ?? "queued"
+        eventType = try container.decodeIfPresent(String.self, forKey: .eventType) ?? ""
+        summary = try container.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        actions = try container.decodeIfPresent([DebugJSONValue].self, forKey: .actions) ?? []
+        bodyState = try container.decodeIfPresent(DebugJSONValue.self, forKey: .bodyState) ?? .object([:])
+        appearance = try container.decodeIfPresent(DebugJSONValue.self, forKey: .appearance) ?? .object([:])
+        companions = try container.decodeIfPresent(DebugJSONValue.self, forKey: .companions) ?? .object([:])
+        environment = try container.decodeIfPresent(DebugJSONValue.self, forKey: .environment) ?? .object([:])
+        moodHypothesis = try container.decodeIfPresent(DebugJSONValue.self, forKey: .moodHypothesis) ?? .object([:])
+        intentHypothesis = try container.decodeIfPresent(DebugJSONValue.self, forKey: .intentHypothesis) ?? .object([:])
+        healthSignals = try container.decodeIfPresent([DebugJSONValue].self, forKey: .healthSignals) ?? []
+        noveltySignals = try container.decodeIfPresent([DebugJSONValue].self, forKey: .noveltySignals) ?? []
+        evidence = try container.decodeIfPresent(DebugJSONValue.self, forKey: .evidence) ?? .object([:])
+        confidence = try container.decodeIfPresent(DebugJSONValue.self, forKey: .confidence) ?? .object([:])
     }
 }
 

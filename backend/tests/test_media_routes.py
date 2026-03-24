@@ -25,6 +25,7 @@ sys.modules.setdefault("dialogue_engine", fake_dialogue_engine)
 
 fake_video_analysis_service = types.ModuleType("video_analysis_service")
 fake_video_analysis_service.build_debug_payload = lambda *args, **kwargs: {}
+fake_video_analysis_service.build_clip_debug_payload = lambda *args, **kwargs: {}
 fake_video_analysis_service.build_memory_debug_payload = lambda *args, **kwargs: {}
 fake_video_analysis_service.create_video_analysis_job = lambda *args, **kwargs: "job-test"
 fake_video_analysis_service.process_video_analysis_job = lambda *args, **kwargs: None
@@ -136,6 +137,51 @@ class VideoAnalysisDebugRouteTests(unittest.TestCase):
 
         self.assertEqual(context.exception.status_code, 404)
         mock_build_debug_payload.assert_called_once_with(99)
+
+
+class VideoAnalysisClipDebugRouteTests(unittest.TestCase):
+    @patch(
+        "routes.media.build_clip_debug_payload",
+        return_value={
+            "id": 14,
+            "sequence": 2,
+            "rule_id": "R12",
+            "primary_rule": "人宠互动候选",
+            "secondary_rules": ["R03"],
+            "clip_url": "/media/clips/14.mp4",
+            "thumbnail_url": "/frames/14.jpg",
+            "start_seconds": 12.0,
+            "end_seconds": 21.0,
+            "analysis_status": "completed",
+            "event_type": "playing",
+            "summary": "主人靠近后，小狗兴奋地迎了上去。",
+            "actions": [],
+            "body_state": {},
+            "appearance": {},
+            "companions": {},
+            "environment": {},
+            "mood_hypothesis": {},
+            "intent_hypothesis": {},
+            "health_signals": [],
+            "novelty_signals": [],
+            "evidence": {},
+            "confidence": {},
+        },
+    )
+    def test_returns_payload_from_clip_debug_builder(self, mock_build_clip_debug_payload):
+        response = media_routes.get_video_analysis_clip_debug(14)
+
+        self.assertEqual(response["id"], 14)
+        self.assertEqual(response["rule_id"], "R12")
+        mock_build_clip_debug_payload.assert_called_once_with(14)
+
+    @patch("routes.media.build_clip_debug_payload", return_value=None)
+    def test_raises_404_when_clip_not_found(self, mock_build_clip_debug_payload):
+        with self.assertRaises(HTTPException) as context:
+            media_routes.get_video_analysis_clip_debug(404)
+
+        self.assertEqual(context.exception.status_code, 404)
+        mock_build_clip_debug_payload.assert_called_once_with(404)
 
 
 class MemoryDebugRouteTests(unittest.TestCase):

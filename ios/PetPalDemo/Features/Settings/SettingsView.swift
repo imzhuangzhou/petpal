@@ -959,7 +959,7 @@ private struct VideoAnalysisDebugView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
 
-    private let frameColumns = [
+    private let candidateClipColumns = [
         GridItem(.adaptive(minimum: 196, maximum: 280), spacing: 12, alignment: .top)
     ]
 
@@ -988,8 +988,7 @@ private struct VideoAnalysisDebugView: View {
                     VStack(spacing: 16) {
                         currentVideoSection
                         processingSection
-                        framesSection
-                        eventsSection
+                        candidateClipsSection
 
                         if let errorMessage {
                             PetPalInlineFeedback(message: errorMessage, tone: .warning)
@@ -1087,55 +1086,41 @@ private struct VideoAnalysisDebugView: View {
         }
     }
 
-    private var framesSection: some View {
+    private var candidateClipsSection: some View {
         PetPalPanelCard {
             PetPalSectionHeader(
-                eyebrow: "抽帧图片",
-                title: "共 \(debugData?.frames.count ?? 0) 张",
+                eyebrow: "候选片段",
+                title: "共 \(candidateClips.count) 段",
                 chipText: nil
             )
 
-            if let debugData, !debugData.frames.isEmpty {
+            if !candidateClips.isEmpty {
                 if horizontalSizeClass == .compact {
                     VStack(spacing: 12) {
-                        ForEach(debugData.frames) { frame in
-                            DebugFrameCard(frame: frame)
+                        ForEach(candidateClips) { clip in
+                            NavigationLink {
+                                VideoAnalysisClipDetailView(clip: clip)
+                            } label: {
+                                DebugCandidateClipCard(clip: clip)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 } else {
-                    LazyVGrid(columns: frameColumns, alignment: .leading, spacing: 12) {
-                        ForEach(debugData.frames) { frame in
-                            DebugFrameCard(frame: frame)
+                    LazyVGrid(columns: candidateClipColumns, alignment: .leading, spacing: 12) {
+                        ForEach(candidateClips) { clip in
+                            NavigationLink {
+                                VideoAnalysisClipDetailView(clip: clip)
+                            } label: {
+                                DebugCandidateClipCard(clip: clip)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
             } else {
                 PetPalSurfaceCard {
-                    Text("当前快照里还没有抽帧图片。")
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundStyle(PetPalTheme.inkSoft)
-                }
-            }
-        }
-    }
-
-    private var eventsSection: some View {
-        PetPalPanelCard {
-            PetPalSectionHeader(
-                eyebrow: "事件列表",
-                title: "共 \(debugData?.events.count ?? 0) 条",
-                chipText: nil
-            )
-
-            if let debugData, !debugData.events.isEmpty {
-                VStack(spacing: 10) {
-                    ForEach(debugData.events) { event in
-                        DebugEventCard(event: event)
-                    }
-                }
-            } else {
-                PetPalSurfaceCard {
-                    Text("当前 camera 还没有分析事件。")
+                    Text("当前还没有候选片段。")
                         .font(.system(size: 13, weight: .medium, design: .rounded))
                         .foregroundStyle(PetPalTheme.inkSoft)
                 }
@@ -1145,6 +1130,10 @@ private struct VideoAnalysisDebugView: View {
 
     private var stepStates: [VideoAnalysisDebugStep] {
         debugData?.stepStates ?? []
+    }
+
+    private var candidateClips: [VideoAnalysisCandidateClip] {
+        debugData?.candidateClips ?? []
     }
 
     private var resolvedVideoURL: URL? {
@@ -1186,22 +1175,10 @@ private struct VideoAnalysisDebugView: View {
     }
 
     private var processingStatusTitle: String {
-        switch debugData?.processingStatus {
-        case "completed":
-            return "已完成"
-        case "queued":
-            return "排队中"
-        case "running":
-            return "处理中"
-        case "failed":
-            return "处理失败"
-        case "not_available":
-            return "暂无快照"
-        case .none:
+        if debugData == nil {
             return isLoading ? "加载中" : "待读取"
-        default:
-            return "开发态"
         }
+        return debugStatusTitle(debugData?.processingStatus ?? "not_available")
     }
 
     @MainActor
@@ -1301,64 +1278,93 @@ private struct DebugStepRow: View {
     }
 }
 
-private struct DebugFrameCard: View {
+private struct DebugCandidateClipCard: View {
     @EnvironmentObject private var appStore: AppStore
 
-    let frame: VideoAnalysisDebugFrame
+    let clip: VideoAnalysisCandidateClip
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             Rectangle()
                 .fill(Color(hex: "FFF3E5"))
                 .frame(maxWidth: .infinity)
-                .aspectRatio(4 / 3, contentMode: .fit)
+                .aspectRatio(16 / 10, contentMode: .fit)
                 .overlay {
-                    AsyncImage(url: resolvedFrameURL) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFill()
-                        case .empty, .failure:
-                            ZStack {
-                                Color.clear
+                    ZStack(alignment: .bottomTrailing) {
+                        AsyncImage(url: resolvedThumbnailURL) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .scaledToFill()
+                            case .empty, .failure:
+                                ZStack {
+                                    Color.clear
 
-                                Image(systemName: "photo")
-                                    .font(.system(size: 22, weight: .bold))
-                                    .foregroundStyle(PetPalTheme.inkSoft)
-                            }
-                        @unknown default:
-                            ZStack {
-                                Color.clear
+                                    Image(systemName: "video")
+                                        .font(.system(size: 22, weight: .bold))
+                                        .foregroundStyle(PetPalTheme.inkSoft)
+                                }
+                            @unknown default:
+                                ZStack {
+                                    Color.clear
 
-                                Image(systemName: "photo")
-                                    .font(.system(size: 22, weight: .bold))
-                                    .foregroundStyle(PetPalTheme.inkSoft)
+                                    Image(systemName: "video")
+                                        .font(.system(size: 22, weight: .bold))
+                                        .foregroundStyle(PetPalTheme.inkSoft)
+                                }
                             }
                         }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                        ZStack {
+                            Circle()
+                                .fill(Color.white.opacity(0.92))
+                                .frame(width: 42, height: 42)
+
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 14, weight: .black))
+                                .foregroundStyle(PetPalTheme.caramel)
+                                .offset(x: 1)
+                        }
+                        .padding(12)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .clipped()
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("#\(frame.sequence)  \(frame.videoTimeText)")
-                    .font(.system(size: 12, weight: .black, design: .rounded))
-                    .foregroundStyle(PetPalTheme.caramel)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
+                    Text("#\(clip.sequence)  \(debugClipRangeText(start: clip.startSeconds, end: clip.endSeconds))")
+                        .font(.system(size: 12, weight: .black, design: .rounded))
+                        .foregroundStyle(PetPalTheme.caramel)
 
-                Text(frame.eventType.ifEmpty("other"))
-                    .font(.system(size: 13, weight: .black, design: .rounded))
+                    Spacer(minLength: 0)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .black))
+                        .foregroundStyle(PetPalTheme.inkSoft)
+                }
+
+                HStack(spacing: 8) {
+                    if !clip.eventType.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        PetPalCapsuleLabel(text: clip.eventType, style: .videoTag)
+                    }
+
+                    PetPalCapsuleLabel(text: debugStatusTitle(clip.analysisStatus), style: debugStatusCapsuleStyle(clip.analysisStatus))
+                }
+
+                Text(clip.primaryRule.ifEmpty("未命中规则"))
+                    .font(.system(size: 14, weight: .black, design: .rounded))
                     .foregroundStyle(PetPalTheme.ink)
                     .lineLimit(1)
 
-                Text(frame.description.ifEmpty("暂无描述"))
+                Text(clip.summary.ifEmpty("Qwen 解析结果生成中..."))
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(PetPalTheme.inkSoft)
-                    .lineLimit(2)
+                    .lineLimit(1)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, minHeight: 76, alignment: .topLeading)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1370,101 +1376,331 @@ private struct DebugFrameCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private var resolvedFrameURL: URL? {
-        appStore.apiClient.resolvedURL(for: frame.frameURL)
+    private var resolvedThumbnailURL: URL? {
+        appStore.apiClient.resolvedURL(for: clip.thumbnailURL)
     }
 }
 
-private struct DebugEventCard: View {
+private struct VideoAnalysisClipDetailView: View {
     @EnvironmentObject private var appStore: AppStore
+    @Environment(\.dismiss) private var dismiss
 
-    let event: VideoAnalysisDebugEvent
+    let clip: VideoAnalysisCandidateClip
+
+    @State private var detail: VideoAnalysisCandidateClipDetailResponse?
+    @State private var isLoading = false
+    @State private var errorMessage: String?
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            ZStack {
-                AsyncImage(url: resolvedFrameURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    default:
-                        ZStack {
-                            Color(hex: "FFF3E5")
-                            Image(systemName: "film.stack")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundStyle(PetPalTheme.inkSoft)
+        PetPalShell {
+            VStack(spacing: 16) {
+                PetPalNavigationHeader(
+                    title: detailEventTitle,
+                    onBack: { dismiss() }
+                )
+                .padding(.horizontal, 20)
+
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 16) {
+                        clipVideoSection
+                        rulesSection
+                        qwenSection
+
+                        if let errorMessage {
+                            PetPalInlineFeedback(message: errorMessage, tone: .warning)
                         }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 32)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .refreshable {
+                    await loadClipDetail()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .navigationBarBackButtonHidden()
+        .toolbar(.hidden, for: .navigationBar)
+        .task {
+            await loadClipDetail()
+        }
+    }
+
+    private var clipVideoSection: some View {
+        PetPalPanelCard {
+            PetPalSectionHeader(
+                eyebrow: "切分短视频",
+                title: "片段 #\(displaySequence)",
+                chipText: debugStatusTitle(displayStatus)
+            )
+
+            if let resolvedClipURL {
+                PetPalPlayableVideoView(url: resolvedClipURL)
+                    .frame(height: 220)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            } else {
+                PetPalSurfaceCard {
+                    Text("当前没有可播放的片段地址。")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(PetPalTheme.inkSoft)
+                }
+            }
+
+            PetPalSurfaceCard {
+                DebugMetadataRow(title: "事件语义", value: detailEventTitle)
+                DebugMetadataRow(title: "片段区间", value: debugClipRangeText(start: displayStartSeconds, end: displayEndSeconds))
+                DebugMetadataRow(title: "分析状态", value: debugStatusTitle(displayStatus))
+            }
+        }
+    }
+
+    private var rulesSection: some View {
+        PetPalPanelCard {
+            PetPalSectionHeader(
+                eyebrow: "OpenCV 规则命中",
+                title: displayPrimaryRule.ifEmpty("暂无规则"),
+                chipText: displayRuleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : displayRuleID
+            )
+
+            PetPalSurfaceCard {
+                DebugMetadataRow(title: "Rule ID", value: displayRuleID.ifEmpty("暂无"))
+                DebugMetadataRow(title: "主规则", value: displayPrimaryRule.ifEmpty("暂无"))
+                DebugMetadataRow(title: "附加规则", value: displaySecondaryRules.isEmpty ? "无" : displaySecondaryRules.joined(separator: " / "))
+            }
+        }
+    }
+
+    private var qwenSection: some View {
+        PetPalPanelCard {
+            PetPalSectionHeader(
+                eyebrow: "Qwen 解析结果",
+                title: "结构化记忆详情",
+                chipText: nil
+            )
+
+            if isLoading && detail == nil {
+                ProgressView("正在读取片段详情...")
+                    .tint(PetPalTheme.caramel)
+            } else if qwenBlocks.isEmpty {
+                PetPalSurfaceCard {
+                    Text("Qwen 解析尚未完成。")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(PetPalTheme.inkSoft)
+                }
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(qwenBlocks) { block in
+                        DebugStructuredValueCard(title: block.title, text: block.text)
                     }
                 }
             }
-            .frame(width: 84, height: 84)
-            .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
 
-            VStack(alignment: .leading, spacing: 6) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(event.eventType.ifEmpty("other"))
-                        .font(.system(size: 14, weight: .black, design: .rounded))
-                        .foregroundStyle(PetPalTheme.ink)
-                        .lineLimit(1)
+    private var qwenBlocks: [DebugStructuredBlock] {
+        if let detail {
+            return [
+                DebugStructuredBlock(title: "clip_summary", text: detail.summary),
+                DebugStructuredBlock(title: "actions", text: DebugJSONValue.array(detail.actions).debugFormattedText),
+                DebugStructuredBlock(title: "body_state", text: detail.bodyState.debugFormattedText),
+                DebugStructuredBlock(title: "appearance", text: detail.appearance.debugFormattedText),
+                DebugStructuredBlock(title: "companions", text: detail.companions.debugFormattedText),
+                DebugStructuredBlock(title: "environment", text: detail.environment.debugFormattedText),
+                DebugStructuredBlock(title: "mood_hypothesis", text: detail.moodHypothesis.debugFormattedText),
+                DebugStructuredBlock(title: "intent_hypothesis", text: detail.intentHypothesis.debugFormattedText),
+                DebugStructuredBlock(title: "health_signals", text: DebugJSONValue.array(detail.healthSignals).debugFormattedText),
+                DebugStructuredBlock(title: "novelty_signals", text: DebugJSONValue.array(detail.noveltySignals).debugFormattedText),
+                DebugStructuredBlock(title: "evidence", text: detail.evidence.debugFormattedText),
+                DebugStructuredBlock(title: "confidence", text: detail.confidence.debugFormattedText),
+            ]
+            .filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        }
 
-                    Text(event.timestamp)
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundStyle(PetPalTheme.inkSoft)
-                        .lineLimit(2)
-                }
+        let fallbackSummary = clip.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fallbackSummary.isEmpty else {
+            return []
+        }
 
-                Text(event.description)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundStyle(PetPalTheme.ink)
-                    .lineSpacing(3)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
+        return [DebugStructuredBlock(title: "clip_summary", text: fallbackSummary)]
+    }
 
-                Text("持续 \(Int(event.durationSeconds)) 秒")
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundStyle(PetPalTheme.caramel)
+    private var displaySequence: Int {
+        max(detail?.sequence ?? clip.sequence, 1)
+    }
 
-                if let clipRangeText {
-                    Text("片段 \(clipRangeText)")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .foregroundStyle(PetPalTheme.inkSoft)
-                }
+    private var displayStatus: String {
+        detail?.analysisStatus ?? clip.analysisStatus
+    }
+
+    private var displayRuleID: String {
+        detail?.ruleID ?? clip.ruleID
+    }
+
+    private var displayPrimaryRule: String {
+        detail?.primaryRule ?? clip.primaryRule
+    }
+
+    private var displaySecondaryRules: [String] {
+        detail?.secondaryRules ?? clip.secondaryRules
+    }
+
+    private var displayStartSeconds: Double {
+        detail?.startSeconds ?? clip.startSeconds
+    }
+
+    private var displayEndSeconds: Double {
+        detail?.endSeconds ?? clip.endSeconds
+    }
+
+    private var detailEventTitle: String {
+        let value = (detail?.eventType ?? clip.eventType).trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? "候选片段" : value
+    }
+
+    private var resolvedClipURL: URL? {
+        let clipPath = (detail?.clipURL ?? clip.clipURL).trimmingCharacters(in: .whitespacesAndNewlines)
+        return appStore.apiClient.resolvedURL(for: clipPath)
+    }
+
+    @MainActor
+    private func loadClipDetail() async {
+        isLoading = true
+        errorMessage = nil
+
+        do {
+            detail = try await appStore.apiClient.fetchVideoAnalysisClipDetail(clipID: clip.id)
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+
+        isLoading = false
+    }
+}
+
+private struct DebugStructuredValueCard: View {
+    let title: String
+    let text: String
+
+    var body: some View {
+        PetPalSurfaceCard {
+            Text(title)
+                .font(.system(size: 13, weight: .black, design: .rounded))
+                .foregroundStyle(PetPalTheme.caramel)
+
+            Text(text)
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(PetPalTheme.ink)
+                .lineSpacing(4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct DebugStructuredBlock: Identifiable {
+    let title: String
+    let text: String
+
+    var id: String { title }
+}
+
+private func debugStatusTitle(_ status: String) -> String {
+    switch status {
+    case "completed":
+        return "已完成"
+    case "queued":
+        return "排队中"
+    case "running":
+        return "处理中"
+    case "failed":
+        return "处理失败"
+    case "not_available":
+        return "暂无快照"
+    default:
+        return "开发态"
+    }
+}
+
+private func debugStatusCapsuleStyle(_ status: String) -> PetPalCapsuleLabel.Style {
+    switch status {
+    case "completed":
+        return .soft
+    case "running", "queued":
+        return .context
+    default:
+        return .videoTag
+    }
+}
+
+private func debugVideoTimeText(_ seconds: Double) -> String {
+    let totalSeconds = max(Int(seconds.rounded(.down)), 0)
+    let minutes = totalSeconds / 60
+    let remainingSeconds = totalSeconds % 60
+    return String(format: "%02d:%02d", minutes, remainingSeconds)
+}
+
+private func debugClipRangeText(start: Double, end: Double) -> String {
+    "\(debugVideoTimeText(start)) - \(debugVideoTimeText(end))"
+}
+
+private extension DebugJSONValue {
+    var debugFormattedText: String {
+        switch self {
+        case .null:
+            return ""
+        case .string(let value):
+            return value.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .number(let value):
+            if value.rounded(.towardZero) == value {
+                return String(Int(value))
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            return String(format: "%.2f", value)
+        case .bool(let value):
+            return value ? "true" : "false"
+        case .object(let value):
+            let lines = value.keys.sorted().compactMap { key -> String? in
+                guard let nestedValue = value[key] else {
+                    return nil
+                }
 
-            Spacer(minLength: 0)
+                let nestedText = nestedValue.debugFormattedText
+                guard !nestedText.isEmpty else {
+                    return nil
+                }
+
+                if nestedText.contains("\n") {
+                    return "\(debugReadableKey(key))：\n\(nestedText.debugIndented())"
+                }
+                return "\(debugReadableKey(key))：\(nestedText)"
+            }
+            return lines.joined(separator: "\n")
+        case .array(let value):
+            let lines = value.compactMap { nestedValue -> String? in
+                let nestedText = nestedValue.debugFormattedText
+                guard !nestedText.isEmpty else {
+                    return nil
+                }
+
+                if nestedText.contains("\n") {
+                    return "•\n\(nestedText.debugIndented())"
+                }
+                return "• \(nestedText)"
+            }
+            return lines.joined(separator: "\n")
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(hex: "FFF8EE").opacity(0.95))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(PetPalTheme.line, lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
+}
 
-    private var resolvedFrameURL: URL? {
-        appStore.apiClient.resolvedURL(for: event.frameURL)
+private extension String {
+    func debugIndented() -> String {
+        split(separator: "\n", omittingEmptySubsequences: false)
+            .map { "  \($0)" }
+            .joined(separator: "\n")
     }
+}
 
-    private var clipRangeText: String? {
-        guard let start = event.videoStartSeconds, let end = event.videoEndSeconds else {
-            return nil
-        }
-
-        return "\(formatVideoTime(start)) - \(formatVideoTime(end))"
-    }
-
-    private func formatVideoTime(_ seconds: Double) -> String {
-        let totalSeconds = max(Int(seconds.rounded(.down)), 0)
-        let minutes = totalSeconds / 60
-        let remainingSeconds = totalSeconds % 60
-        return String(format: "%02d:%02d", minutes, remainingSeconds)
-    }
+private func debugReadableKey(_ key: String) -> String {
+    key.replacingOccurrences(of: "_", with: " ")
 }
 
 private struct PetPalDangerButtonStyle: ButtonStyle {

@@ -343,6 +343,80 @@ def build_debug_payload(camera_id: int) -> Optional[dict]:
     }
 
 
+def build_clip_debug_payload(clip_id: int) -> Optional[dict]:
+    row = query_db(
+        """
+        SELECT
+            cc.id,
+            cc.job_id,
+            cc.camera_id,
+            cc.pet_id,
+            cc.rule_id,
+            cc.primary_rule,
+            cc.secondary_rules_json,
+            cc.source_video_start_seconds,
+            cc.source_video_end_seconds,
+            cc.clip_url,
+            cc.thumbnail_url,
+            cc.analysis_status,
+            cm.summary,
+            cm.actions_json,
+            cm.body_state_json,
+            cm.appearance_json,
+            cm.interaction_json,
+            cm.environment_json,
+            cm.mood_hypothesis_json,
+            cm.intent_hypothesis_json,
+            cm.health_signals_json,
+            cm.novelty_signals_json,
+            cm.evidence_json,
+            cm.confidence_json
+        FROM candidate_clips cc
+        LEFT JOIN clip_memories cm ON cm.clip_id = cc.id
+        WHERE cc.id = ?
+        LIMIT 1
+        """,
+        (clip_id,),
+        one=True,
+    )
+    if not row:
+        return None
+
+    sequence = _resolve_clip_sequence(row)
+    memory = {
+        "clip_summary": row.get("summary", "") or "",
+        "actions": _load_json_list(row.get("actions_json")),
+        "body_state": _load_json_object(row.get("body_state_json")),
+    }
+    event_type, _ = _project_event_shape(str(row.get("rule_id") or "R18"), memory)
+
+    return {
+        "id": row["id"],
+        "sequence": sequence,
+        "rule_id": row.get("rule_id", "") or "",
+        "primary_rule": row.get("primary_rule", "") or "",
+        "secondary_rules": _load_json_list(row.get("secondary_rules_json")),
+        "clip_url": row.get("clip_url", "") or "",
+        "thumbnail_url": row.get("thumbnail_url", "") or "",
+        "start_seconds": float(row.get("source_video_start_seconds") or 0.0),
+        "end_seconds": float(row.get("source_video_end_seconds") or 0.0),
+        "analysis_status": row.get("analysis_status", "queued") or "queued",
+        "event_type": event_type,
+        "summary": row.get("summary", "") or "",
+        "actions": _load_json_list(row.get("actions_json")),
+        "body_state": _load_json_object(row.get("body_state_json")),
+        "appearance": _load_json_object(row.get("appearance_json")),
+        "companions": _load_json_object(row.get("interaction_json")),
+        "environment": _load_json_object(row.get("environment_json")),
+        "mood_hypothesis": _load_json_object(row.get("mood_hypothesis_json")),
+        "intent_hypothesis": _load_json_object(row.get("intent_hypothesis_json")),
+        "health_signals": _load_json_list(row.get("health_signals_json")),
+        "novelty_signals": _load_json_list(row.get("novelty_signals_json")),
+        "evidence": _load_json_object(row.get("evidence_json")),
+        "confidence": _load_json_object(row.get("confidence_json")),
+    }
+
+
 def build_memory_debug_payload(pet_id: int) -> dict:
     from memory_service import get_latest_daily_memory, get_profile_memories
 
@@ -793,6 +867,53 @@ def _build_event_timestamp(seconds_from_start: float, max_seconds: float) -> dat
     else:
         base_time = today_start
     return base_time + timedelta(seconds=seconds_from_start)
+
+
+def _resolve_clip_sequence(row: dict) -> int:
+    start_seconds = float(row.get("source_video_start_seconds") or 0.0)
+    clip_id = int(row.get("id") or 0)
+    job_id = str(row.get("job_id") or "").strip()
+
+    if job_id:
+        sequence_row = query_db(
+            """
+            SELECT COUNT(*) AS clip_sequence
+            FROM candidate_clips
+            WHERE job_id = ?
+              AND (
+                    source_video_start_seconds < ?
+                    OR (ABS(source_video_start_seconds - ?) < 0.0001 AND id <= ?)
+              )
+            """,
+            (job_id, start_seconds, start_seconds, clip_id),
+            one=True,
+        )
+    else:
+        sequence_row = query_db(
+            """
+            SELECT COUNT(*) AS clip_sequence
+            FROM candidate_clips
+            WHERE camera_id = ? AND pet_id = ?
+              AND (
+                    source_video_start_seconds < ?
+                    OR (ABS(source_video_start_seconds - ?) < 0.0001 AND id <= ?)
+              )
+            """,
+            (
+                row.get("camera_id"),
+                row.get("pet_id"),
+                start_seconds,
+                start_seconds,
+                clip_id,
+            ),
+            one=True,
+        )
+
+    try:
+        sequence = int((sequence_row or {}).get("clip_sequence") or 0)
+    except (TypeError, ValueError):
+        sequence = 0
+    return max(sequence, 1)
 
 
 def _format_video_seconds(seconds: float) -> str:
