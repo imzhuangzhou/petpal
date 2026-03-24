@@ -773,12 +773,38 @@ struct SettingsView: View {
                 )
             )
             appStore.applyUploadedDemoVideo(response)
+            Task {
+                await pollVideoAnalysisStatus(cameraID: response.cameraID, fallbackJobID: response.jobID)
+            }
             self.selectedVideo = nil
         } catch {
             videoErrorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
 
         isUploadingVideo = false
+    }
+
+    private func pollVideoAnalysisStatus(cameraID: Int, fallbackJobID: String?) async {
+        let maxAttempts = 12
+        for _ in 0..<maxAttempts {
+            do {
+                let debugResponse = try await appStore.apiClient.fetchVideoAnalysisDebug(cameraID: cameraID)
+                await MainActor.run {
+                    appStore.updateVideoAnalysisStatus(
+                        jobID: debugResponse.jobID ?? fallbackJobID,
+                        processingStatus: debugResponse.processingStatus
+                    )
+                }
+
+                if ["completed", "failed", "not_available"].contains(debugResponse.processingStatus) {
+                    return
+                }
+            } catch {
+                return
+            }
+
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+        }
     }
 
     private func savePetProfile() async {
@@ -1163,6 +1189,12 @@ private struct VideoAnalysisDebugView: View {
         switch debugData?.processingStatus {
         case "completed":
             return "已完成"
+        case "queued":
+            return "排队中"
+        case "running":
+            return "处理中"
+        case "failed":
+            return "处理失败"
         case "not_available":
             return "暂无快照"
         case .none:
@@ -1186,6 +1218,29 @@ private struct VideoAnalysisDebugView: View {
         }
 
         isLoading = false
+    }
+
+    private func pollVideoAnalysisStatus(cameraID: Int, fallbackJobID: String?) async {
+        let maxAttempts = 12
+        for _ in 0..<maxAttempts {
+            do {
+                let debugResponse = try await appStore.apiClient.fetchVideoAnalysisDebug(cameraID: cameraID)
+                await MainActor.run {
+                    appStore.updateVideoAnalysisStatus(
+                        jobID: debugResponse.jobID ?? fallbackJobID,
+                        processingStatus: debugResponse.processingStatus
+                    )
+                }
+
+                if ["completed", "failed", "not_available"].contains(debugResponse.processingStatus) {
+                    return
+                }
+            } catch {
+                return
+            }
+
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+        }
     }
 }
 

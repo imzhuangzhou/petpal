@@ -15,6 +15,8 @@ struct AppSession: Codable {
     var cameraName: String
     var demoVideoName: String
     var demoVideoURL: String
+    var analysisJobID: String
+    var analysisProcessingStatus: String
     var setupComplete: Bool
 
     init(
@@ -32,6 +34,8 @@ struct AppSession: Codable {
         cameraName: String = "",
         demoVideoName: String = "",
         demoVideoURL: String = "",
+        analysisJobID: String = "",
+        analysisProcessingStatus: String = "",
         setupComplete: Bool = false
     ) {
         self.userId = userId
@@ -48,6 +52,8 @@ struct AppSession: Codable {
         self.cameraName = cameraName
         self.demoVideoName = demoVideoName
         self.demoVideoURL = demoVideoURL
+        self.analysisJobID = analysisJobID
+        self.analysisProcessingStatus = analysisProcessingStatus
         self.setupComplete = setupComplete
     }
 
@@ -66,6 +72,8 @@ struct AppSession: Codable {
         case cameraName
         case demoVideoName
         case demoVideoURL
+        case analysisJobID
+        case analysisProcessingStatus
         case setupComplete
     }
 
@@ -85,6 +93,8 @@ struct AppSession: Codable {
         cameraName = try container.decodeIfPresent(String.self, forKey: .cameraName) ?? ""
         demoVideoName = try container.decodeIfPresent(String.self, forKey: .demoVideoName) ?? ""
         demoVideoURL = try container.decodeIfPresent(String.self, forKey: .demoVideoURL) ?? ""
+        analysisJobID = try container.decodeIfPresent(String.self, forKey: .analysisJobID) ?? ""
+        analysisProcessingStatus = try container.decodeIfPresent(String.self, forKey: .analysisProcessingStatus) ?? ""
         setupComplete = try container.decodeIfPresent(Bool.self, forKey: .setupComplete) ?? false
     }
 }

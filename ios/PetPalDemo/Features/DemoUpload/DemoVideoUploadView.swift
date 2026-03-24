@@ -300,8 +300,34 @@ struct DemoVideoUploadView: View {
             )
 
             appStore.applyUploadedDemoVideo(response)
+            Task {
+                await pollVideoAnalysisStatus(cameraID: response.cameraID, fallbackJobID: response.jobID)
+            }
         } catch {
             errorMessage = (error as? APIError)?.errorDescription ?? "连接成功了，但联调视频上传失败，请再试一次。"
+        }
+    }
+
+    private func pollVideoAnalysisStatus(cameraID: Int, fallbackJobID: String?) async {
+        let maxAttempts = 12
+        for _ in 0..<maxAttempts {
+            do {
+                let debugResponse = try await appStore.apiClient.fetchVideoAnalysisDebug(cameraID: cameraID)
+                await MainActor.run {
+                    appStore.updateVideoAnalysisStatus(
+                        jobID: debugResponse.jobID ?? fallbackJobID,
+                        processingStatus: debugResponse.processingStatus
+                    )
+                }
+
+                if ["completed", "failed", "not_available"].contains(debugResponse.processingStatus) {
+                    return
+                }
+            } catch {
+                return
+            }
+
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
         }
     }
 }

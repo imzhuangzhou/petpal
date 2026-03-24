@@ -28,6 +28,7 @@ struct PetSetupDraft: Equatable {
     var selectedDogDefaultAvatarID: String
     var referencePhotoRemotePath: String
     var generatedAvatarRemotePath: String
+    var avatarGenerationJobID: String
     var avatarGenerationState: AvatarGenerationState
     var avatarMessage: String?
     var defaultAvatarAssetName: String
@@ -119,9 +120,18 @@ final class AppStore: ObservableObject {
         session.cameraName = response.cameraName
         session.demoVideoName = response.demoVideoName
         session.demoVideoURL = response.demoVideoURL
+        session.analysisJobID = response.jobID ?? ""
+        session.analysisProcessingStatus = response.processingStatus ?? ""
         session.setupComplete = true
         petSetupDraft = nil
         onboardingRoute = .derivedFromSession
+    }
+
+    func updateVideoAnalysisStatus(jobID: String?, processingStatus: String) {
+        if let jobID, !jobID.isEmpty {
+            session.analysisJobID = jobID
+        }
+        session.analysisProcessingStatus = processingStatus
     }
 
     func reset() {

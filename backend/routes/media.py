@@ -7,10 +7,16 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 
 from database import execute_db, query_db
 from dialogue_engine import invalidate_event_cache
+from video_analysis_service import (
+    build_debug_payload,
+    build_memory_debug_payload,
+    create_video_analysis_job,
+    process_video_analysis_job,
+)
 from video_processor import extract_uniform_frames
 from vlm_service import (
     DASHSCOPE_API_KEY,
@@ -35,6 +41,10 @@ os.makedirs(AVATAR_UPLOADS_DIR, exist_ok=True)
 
 MAX_ANALYSIS_FRAMES = 10
 logger = logging.getLogger(__name__)
+AVATAR_JOB_STATUS_QUEUED = "queued"
+AVATAR_JOB_STATUS_PROCESSING = "processing"
+AVATAR_JOB_STATUS_COMPLETED = "completed"
+AVATAR_JOB_STATUS_FAILED = "failed"
 
 DEBUG_STEP_DEFINITIONS = [
     ("video_saved", "视频已保存"),
@@ -75,6 +85,115 @@ def mimetype_to_extension(mime_type):
         "image/webp": ".webp",
     }
     return mapping.get(mime_type, ".png")
+
+
+def _serialize_avatar_generation_job(job: dict) -> dict:
+    return {
+        "job_id": job["job_id"],
+        "status": job.get("status", AVATAR_JOB_STATUS_QUEUED),
+        "photo_url": job.get("photo_url", ""),
+        "avatar_url": job.get("avatar_url", ""),
+        "generation_error": job.get("error_message", "") or None,
+    }
+
+
+def _create_avatar_generation_job(
+    *,
+    job_id: str,
+    species: str,
+    photo_relative_path: str,
+):
+    execute_db(
+        """
+        INSERT INTO avatar_generation_jobs (
+            job_id, species, photo_url, avatar_url, status, error_message, updated_at
+        )
+        VALUES (?, ?, ?, '', ?, '', CURRENT_TIMESTAMP)
+        """,
+        (
+            job_id,
+            species,
+            photo_relative_path,
+            AVATAR_JOB_STATUS_QUEUED,
+        ),
+    )
+
+
+def _update_avatar_generation_job(
+    *,
+    job_id: str,
+    status: str,
+    avatar_relative_path: str = "",
+    generation_error: str = "",
+):
+    execute_db(
+        """
+        UPDATE avatar_generation_jobs
+        SET status = ?, avatar_url = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE job_id = ?
+        """,
+        (
+            status,
+            avatar_relative_path,
+            generation_error,
+            job_id,
+        ),
+    )
+
+
+def _run_avatar_generation_job(job_id: str, photo_path: str, species: str):
+    generation_started_at = time.perf_counter()
+    logger.info(
+        "Starting avatar generation job: job_id=%s species=%s photo_path=%s",
+        job_id,
+        species,
+        photo_path,
+    )
+    _update_avatar_generation_job(job_id=job_id, status=AVATAR_JOB_STATUS_PROCESSING)
+
+    try:
+        generated_image, mime_type = generate_pet_avatar(photo_path, species)
+        avatar_stored_name, _ = save_generated_file(generated_image, AVATAR_UPLOADS_DIR, mime_type)
+        avatar_relative_path = f"/media/avatars/{avatar_stored_name}"
+        _update_avatar_generation_job(
+            job_id=job_id,
+            status=AVATAR_JOB_STATUS_COMPLETED,
+            avatar_relative_path=avatar_relative_path,
+        )
+        logger.info(
+            "Completed avatar generation job: job_id=%s avatar_path=%s elapsed=%.2fs",
+            job_id,
+            avatar_relative_path,
+            time.perf_counter() - generation_started_at,
+        )
+    except Exception as exc:
+        generation_error = str(exc)
+        _update_avatar_generation_job(
+            job_id=job_id,
+            status=AVATAR_JOB_STATUS_FAILED,
+            generation_error=generation_error,
+        )
+        logger.warning(
+            "Avatar generation job failed: job_id=%s error=%s elapsed=%.2fs",
+            job_id,
+            generation_error,
+            time.perf_counter() - generation_started_at,
+        )
+
+
+def _get_avatar_generation_job_or_404(job_id: str) -> dict:
+    job = query_db(
+        """
+        SELECT job_id, status, photo_url, avatar_url, error_message
+        FROM avatar_generation_jobs
+        WHERE job_id = ?
+        """,
+        (job_id,),
+        one=True,
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="头像生成任务不存在")
+    return job
 
 
 def _relative_frame_path(frame_path: str) -> str:
@@ -364,8 +483,58 @@ def _persist_video_analysis_debug_snapshot(
     )
 
 
-@router.post("/pet/avatar/generate")
+def _upsert_demo_camera(
+    *,
+    user_id: int,
+    camera_name: str,
+    camera_id: Optional[int],
+    video_relative_path: str,
+    original_filename: str,
+) -> int:
+    if camera_id:
+        camera = query_db(
+            "SELECT id, user_id FROM cameras WHERE id = ?",
+            (camera_id,),
+            one=True,
+        )
+        if not camera:
+            raise HTTPException(status_code=404, detail="Camera not found")
+
+        execute_db(
+            """
+            UPDATE cameras
+            SET name = ?,
+                stream_url = '',
+                is_demo = 1,
+                status = 'processing',
+                demo_video_path = ?,
+                demo_video_name = ?
+            WHERE id = ?
+            """,
+            (camera_name, video_relative_path, original_filename, camera_id),
+        )
+        return camera_id
+
+    return execute_db(
+        """
+        INSERT INTO cameras (
+            user_id,
+            name,
+            stream_url,
+            is_demo,
+            status,
+            demo_video_path,
+            demo_video_name
+        )
+        VALUES (?, ?, '', 1, 'processing', ?, ?)
+        """,
+        (user_id, camera_name, video_relative_path, original_filename),
+    )
+
+
+@router.post("/pet/avatar/generate", status_code=202)
 def upload_pet_reference_and_generate_avatar(
+    background_tasks: BackgroundTasks,
     species: str = Form("cat"),
     image: UploadFile = File(...),
 ):
@@ -383,8 +552,7 @@ def upload_pet_reference_and_generate_avatar(
 
     stored_name, photo_path = save_upload_file(image, IMAGE_UPLOADS_DIR)
     photo_relative_path = f"/media/images/{stored_name}"
-    avatar_relative_path = ""
-    generation_error = None
+    job_id = uuid.uuid4().hex
     photo_size = os.path.getsize(photo_path)
 
     logger.info(
@@ -394,34 +562,39 @@ def upload_pet_reference_and_generate_avatar(
         time.perf_counter() - request_started_at,
     )
 
-    try:
-        generation_started_at = time.perf_counter()
-        generated_image, mime_type = generate_pet_avatar(photo_path, species)
-        avatar_stored_name, _ = save_generated_file(generated_image, AVATAR_UPLOADS_DIR, mime_type)
-        avatar_relative_path = f"/media/avatars/{avatar_stored_name}"
-        logger.info(
-            "Pet avatar generated successfully: avatar_path=%s elapsed=%.2fs total=%.2fs",
-            avatar_relative_path,
-            time.perf_counter() - generation_started_at,
-            time.perf_counter() - request_started_at,
-        )
-    except Exception as exc:
-        generation_error = str(exc)
-        logger.warning(
-            "Pet avatar generation failed: error=%s total=%.2fs",
-            generation_error,
-            time.perf_counter() - request_started_at,
-        )
+    _create_avatar_generation_job(
+        job_id=job_id,
+        species=species,
+        photo_relative_path=photo_relative_path,
+    )
+    background_tasks.add_task(_run_avatar_generation_job, job_id, photo_path, species)
 
-    return {
-        "photo_url": photo_relative_path,
-        "avatar_url": avatar_relative_path,
-        "generation_error": generation_error,
-    }
+    logger.info(
+        "Queued pet avatar generation job: job_id=%s total=%.2fs",
+        job_id,
+        time.perf_counter() - request_started_at,
+    )
+
+    return _serialize_avatar_generation_job(
+        {
+            "job_id": job_id,
+            "status": AVATAR_JOB_STATUS_QUEUED,
+            "photo_url": photo_relative_path,
+            "avatar_url": "",
+            "error_message": "",
+        }
+    )
+
+
+@router.get("/pet/avatar/generate/{job_id}")
+def get_pet_avatar_generation_job(job_id: str):
+    job = _get_avatar_generation_job_or_404(job_id)
+    return _serialize_avatar_generation_job(job)
 
 
 @router.post("/demo-video")
 def upload_demo_video(
+    background_tasks: BackgroundTasks,
     user_id: int = Form(...),
     pet_id: int = Form(...),
     camera_name: str = Form("家庭摄像头"),
@@ -440,24 +613,21 @@ def upload_demo_video(
     original_filename = video.filename or stored_name
 
     try:
-        analyzed_events, context_summary, debug_frames = _analyze_uploaded_video(file_path, original_filename)
-        target_camera_id = _persist_analyzed_events(
+        target_camera_id = _upsert_demo_camera(
             user_id=user_id,
-            pet_id=pet_id,
             camera_name=camera_name,
             camera_id=camera_id,
             video_relative_path=relative_path,
             original_filename=original_filename,
-            analyzed_events=analyzed_events,
         )
-        _persist_video_analysis_debug_snapshot(
+        job_id = create_video_analysis_job(
             camera_id=target_camera_id,
             pet_id=pet_id,
-            demo_video_name=original_filename,
+            source_video_path=file_path,
+            source_video_name=original_filename,
             demo_video_url=relative_path,
-            context_summary=context_summary,
-            frames=debug_frames,
         )
+        background_tasks.add_task(process_video_analysis_job, job_id)
     except HTTPException:
         try:
             os.remove(file_path)
@@ -476,68 +646,24 @@ def upload_demo_video(
         "camera_name": camera_name,
         "demo_video_name": original_filename,
         "demo_video_url": relative_path,
-        "context_summary": context_summary,
-        "events_count": len(analyzed_events),
+        "job_id": job_id,
+        "processing_status": "queued",
+        "context_summary": "视频已接收，正在后台分析候选片段与宠物记忆。",
+        "events_count": 0,
     }
 
 
 @router.get("/debug/video-analysis/{camera_id}")
 def get_video_analysis_debug(camera_id: int):
-    camera = query_db(
-        "SELECT id, name, status, demo_video_path, demo_video_name FROM cameras WHERE id = ?",
-        (camera_id,),
-        one=True,
-    )
-    if not camera:
+    payload = build_debug_payload(camera_id)
+    if not payload:
         raise HTTPException(status_code=404, detail="Camera not found")
+    return payload
 
-    snapshot = query_db(
-        """
-        SELECT camera_id, pet_id, demo_video_name, demo_video_url, context_summary,
-               processing_status, step_states_json, frames_json, updated_at
-        FROM video_analysis_debug_snapshots
-        WHERE camera_id = ?
-        """,
-        (camera_id,),
-        one=True,
-    )
-    events = query_db(
-        """
-        SELECT id, pet_id, event_type, description, timestamp, duration_seconds,
-               video_start_seconds, video_end_seconds, frame_path
-        FROM events
-        WHERE camera_id = ?
-        ORDER BY timestamp DESC
-        """,
-        (camera_id,),
-    )
 
-    pet_id = (
-        snapshot.get("pet_id")
-        if snapshot
-        else (events[0].get("pet_id") if events else None)
-    )
-
-    return {
-        "camera_id": camera_id,
-        "pet_id": pet_id,
-        "demo_video_name": (
-            snapshot.get("demo_video_name")
-            if snapshot and snapshot.get("demo_video_name")
-            else camera.get("demo_video_name", "")
-        ),
-        "demo_video_url": (
-            snapshot.get("demo_video_url")
-            if snapshot and snapshot.get("demo_video_url")
-            else camera.get("demo_video_path", "")
-        ),
-        "context_summary": snapshot.get("context_summary", "") if snapshot else "",
-        "processing_status": snapshot.get("processing_status", "not_available") if snapshot else "not_available",
-        "step_states": _load_json_list(snapshot.get("step_states_json")) if snapshot else [],
-        "frames": _load_json_list(snapshot.get("frames_json")) if snapshot else [],
-        "events": [_serialize_debug_event(event) for event in events],
-        "last_updated_at": snapshot.get("updated_at") if snapshot else None,
-    }
+@router.get("/debug/memory/{pet_id}")
+def get_memory_debug(pet_id: int):
+    return build_memory_debug_payload(pet_id)
 
 
 @router.post("/pet/{pet_id}/voice/sample")

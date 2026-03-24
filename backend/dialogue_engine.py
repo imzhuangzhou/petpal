@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Optional
 from database import query_db
+from memory_service import build_memory_prompt_context, get_daily_memory
 from vlm_service import generate_text, open_dashscope_stream, TEXT_MODEL
 
 logger = logging.getLogger(__name__)
@@ -166,6 +167,56 @@ def _compute_stats(events: list) -> dict:
     }
 
 
+def _compute_stats_from_daily_counts(daily_counts: dict, fallback_stats: dict) -> dict:
+    if not isinstance(daily_counts, dict):
+        return fallback_stats
+
+    action_counts = daily_counts.get("actions", {})
+    if not isinstance(action_counts, dict):
+        action_counts = {}
+
+    def count_matching(*keywords: str) -> int:
+        total = 0
+        for label, raw_count in action_counts.items():
+            try:
+                count = int(raw_count)
+            except (TypeError, ValueError):
+                continue
+            normalized = str(label or "").lower()
+            if any(keyword in normalized for keyword in keywords):
+                total += count
+        return total
+
+    waiting_count = daily_counts.get("waiting_count", 0)
+    try:
+        waiting_count = int(waiting_count)
+    except (TypeError, ValueError):
+        waiting_count = 0
+
+    return {
+        "eating": count_matching("吃", "eat", "meal", "food"),
+        "drinking": count_matching("喝", "饮", "drink", "water"),
+        "sleeping": count_matching("睡", "sleep", "rest"),
+        "playing": count_matching("玩", "play", "跑", "zoom"),
+        "waiting": waiting_count,
+        "litter_box": count_matching("厕", "砂", "litter"),
+    } or fallback_stats
+
+
+def _render_health_flag_lines(health_flags: list[dict]) -> str:
+    lines = []
+    for flag in health_flags[:4]:
+        if not isinstance(flag, dict):
+            continue
+        title = str(flag.get("title") or flag.get("label") or "").strip()
+        message = str(flag.get("message") or flag.get("reason") or "").strip()
+        if title and message:
+            lines.append(f"- {title}：{message}")
+        elif title:
+            lines.append(f"- {title}")
+    return "\n".join(lines) if lines else "暂无明显健康提示。"
+
+
 def get_today_events(pet_id: int) -> list:
     """Get all events for a pet from today (UTC-based)."""
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0).isoformat()
@@ -208,16 +259,23 @@ def build_system_prompt(pet: dict, today_events: list) -> str:
     else:
         persona = style_config["prompt"].format(pet_name=pet["name"])
 
-    # Use cached event context
     pet_id = pet.get("id") or 0
-    event_summary, stats, _ = get_cached_event_context(pet_id)
+    event_summary, fallback_stats, _ = get_cached_event_context(pet_id)
+    memory_context = build_memory_prompt_context(pet_id)
+    stats = _compute_stats_from_daily_counts(memory_context.get("daily_counts", {}), fallback_stats)
+    daily_summary = (memory_context.get("daily_summary") or "").strip() or event_summary
+    recent_clip_lines = memory_context.get("recent_clip_lines", [])
+    recent_clip_text = "\n".join(recent_clip_lines[:5]) if recent_clip_lines else "暂无最近片段记忆。"
+    profile_lines = memory_context.get("profile_lines", [])
+    profile_text = "\n".join(profile_lines[:8]) if profile_lines else "暂无稳定长期画像。"
+    health_flag_text = _render_health_flag_lines(memory_context.get("health_flags", []))
 
     if owner_alias:
         owner_reference = f"你的主人希望你称呼 TA 为“{owner_alias}”。"
-        owner_rule = f"7. 如果需要称呼主人，优先使用“{owner_alias}”，不要改用其他称呼"
+        owner_rule = f"9. 如果需要称呼主人，优先使用“{owner_alias}”，不要改用其他称呼"
     else:
         owner_reference = "如果需要称呼主人，可以自然称呼对方为铲屎官。"
-        owner_rule = "7. 如果需要称呼主人，可以自然称呼对方为铲屎官"
+        owner_rule = "9. 如果需要称呼主人，可以自然称呼对方为铲屎官"
 
     system_prompt = f"""
 {persona}
@@ -225,8 +283,17 @@ def build_system_prompt(pet: dict, today_events: list) -> str:
 你是一只{breed_or_species}，名字叫{pet["name"]}。
 {owner_reference}
 
-=== 今日行为记录 ===
-{event_summary}
+=== 最近片段记忆 ===
+{recent_clip_text}
+
+=== 今日综合记忆 ===
+{daily_summary}
+
+=== 长期画像 ===
+{profile_text}
+
+=== 健康提示 ===
+{health_flag_text}
 
 === 今日统计 ===
 - 进食次数：{stats['eating']} 次
@@ -237,13 +304,15 @@ def build_system_prompt(pet: dict, today_events: list) -> str:
 
 === 对话规则 ===
 1. 始终保持你的宠物人设，用第一人称说话
-2. 回答主人问题时，参考今日行为记录来回答
+2. 回答主人问题时，优先参考最近片段记忆、今日综合记忆和长期画像来回答
 3. 如果主人问到你没有记录的事情，可以根据人设合理地创编
 4. 每次回复控制在1到3句、100字以内，像聊天消息，不像小作文
 5. 默认不要用emoji、颜文字和动作旁白，重点放在自然口语
 6. 少解释、少总结、少排比，不要有明显AI腔
+7. 事实优先级是：最近片段证据 > 今日综合记忆 > 长期画像 > 人设创编
+8. 对情绪、意图、健康等带推测性质的内容要说得自然，但不要说成百分百确定
 {owner_rule}
-8. 不要暴露你是AI，你就是这只宠物
+10. 不要暴露你是AI，你就是这只宠物
 """
     return system_prompt
 
@@ -410,7 +479,7 @@ def match_related_events(reply_text: str, pet_id: int, top_n: int = 3) -> list[d
             "event_type": e.get("event_type", ""),
             "description": e.get("description", ""),
             "timestamp": e.get("timestamp", ""),
-            "video_clip_url": "",
+            "video_clip_url": e.get("clip_url", "") or "",
         })
     return results
 
@@ -547,7 +616,12 @@ def generate_daily_report_payload(pet_id: int) -> dict:
             },
         }
 
-    _, stats, events = get_cached_event_context(pet_id)
+    daily_memory = get_daily_memory(pet_id)
+    _, fallback_stats, events = get_cached_event_context(pet_id)
+    stats = _compute_stats_from_daily_counts(
+        daily_memory.get("activity_counts", {}) if daily_memory else {},
+        fallback_stats,
+    )
     system_prompt = build_system_prompt(pet, events)
 
     prompt = (
@@ -589,6 +663,23 @@ def generate_diary(pet_id: int) -> str:
 
 def get_health_alerts(pet_id: int) -> list:
     """Check for health anomalies based on today's events."""
+    daily_memory = get_daily_memory(pet_id)
+    if daily_memory:
+        health_flags = daily_memory.get("health_flags", [])
+        normalized = []
+        for flag in health_flags:
+            if not isinstance(flag, dict):
+                continue
+            normalized.append(
+                {
+                    "level": flag.get("level", "normal"),
+                    "title": flag.get("title") or flag.get("label") or "健康提示",
+                    "message": flag.get("message") or flag.get("reason") or "今天暂时没有额外说明。",
+                }
+            )
+        if normalized:
+            return normalized
+
     events = get_today_events(pet_id)
     alerts = []
 
@@ -639,6 +730,60 @@ def get_health_alerts(pet_id: int) -> list:
 
 def get_anxiety_score(pet_id: int) -> dict:
     """Calculate separation anxiety score based on waiting behavior."""
+    daily_memory = get_daily_memory(pet_id)
+    if daily_memory:
+        activity_counts = daily_memory.get("activity_counts", {})
+        waiting_count = int(activity_counts.get("waiting_count", 0) or 0)
+        total_waiting_time = float(activity_counts.get("waiting_seconds", 0.0) or 0.0)
+        timeline = daily_memory.get("timeline", [])
+        longest_waiting_time = 0.0
+        for item in timeline:
+            if not isinstance(item, dict):
+                continue
+            if item.get("primary_rule") != "R08":
+                continue
+            try:
+                segment_duration = float(item.get("end_seconds", 0.0) or 0.0) - float(item.get("start_seconds", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                segment_duration = 0.0
+            longest_waiting_time = max(longest_waiting_time, max(segment_duration, 0.0))
+
+        total_actions = sum(
+            int(raw_count)
+            for raw_count in (activity_counts.get("actions", {}) or {}).values()
+            if isinstance(raw_count, (int, float)) or str(raw_count).isdigit()
+        )
+        total_event_time = max(total_waiting_time, float(total_actions * 60))
+        waiting_share_percent = (
+            round(total_waiting_time / total_event_time * 100)
+            if total_event_time > 0
+            else 0
+        )
+
+        score = min(100, int(waiting_count * 15 + total_waiting_time / 60 * 5))
+        if score < 20:
+            level = "relaxed"
+            comment = "很放松，完全没有焦虑的迹象~"
+        elif score < 50:
+            level = "mild"
+            comment = "有一点想你，但总体还好"
+        elif score < 75:
+            level = "moderate"
+            comment = "比较想你，在门口等了好一会儿"
+        else:
+            level = "high"
+            comment = "非常想你！一直在门口等你回来"
+
+        return {
+            "score": score,
+            "level": level,
+            "comment": comment,
+            "waiting_count": waiting_count,
+            "total_waiting_minutes": round(total_waiting_time / 60, 1),
+            "longest_waiting_minutes": round(longest_waiting_time / 60, 1),
+            "waiting_share_percent": waiting_share_percent,
+        }
+
     events = get_today_events(pet_id)
 
     waiting_events = [e for e in events if e["event_type"] == "waiting"]

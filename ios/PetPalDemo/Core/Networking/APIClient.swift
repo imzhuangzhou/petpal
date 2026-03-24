@@ -1,7 +1,7 @@
 import Foundation
 
 final class APIClient {
-    private static let avatarGenerationTimeout: TimeInterval = 180
+    private static let avatarGenerationRequestTimeout: TimeInterval = 60
 
     let baseURL: URL
     private let session: URLSession
@@ -74,8 +74,12 @@ final class APIClient {
             endpoint: Endpoint(path: "/api/pet/avatar/generate", method: .post),
             body: body,
             contentType: "multipart/form-data; boundary=\(boundary)",
-            timeoutInterval: Self.avatarGenerationTimeout
+            timeoutInterval: Self.avatarGenerationRequestTimeout
         )
+    }
+
+    func fetchPetAvatarGenerationJob(jobID: String) async throws -> GeneratedPetAvatarResponse {
+        try await fetch(endpoint: Endpoint(path: "/api/pet/avatar/generate/\(jobID)"))
     }
 
     func uploadDemoVideo(_ requestBody: DemoVideoUploadRequest) async throws -> DemoVideoUploadResponse {
@@ -335,26 +339,46 @@ final class APIClient {
 struct VideoAnalysisDebugResponse: Decodable, Sendable {
     let cameraID: Int
     let petID: Int?
+    let jobID: String?
     let demoVideoName: String
     let demoVideoURL: String
     let contextSummary: String
     let processingStatus: String
     let stepStates: [VideoAnalysisDebugStep]
     let frames: [VideoAnalysisDebugFrame]
+    let candidateClips: [VideoAnalysisCandidateClip]
     let events: [VideoAnalysisDebugEvent]
     let lastUpdatedAt: String?
 
     enum CodingKeys: String, CodingKey {
         case cameraID = "camera_id"
         case petID = "pet_id"
+        case jobID = "job_id"
         case demoVideoName = "demo_video_name"
         case demoVideoURL = "demo_video_url"
         case contextSummary = "context_summary"
         case processingStatus = "processing_status"
         case stepStates = "step_states"
         case frames
+        case candidateClips = "candidate_clips"
         case events
         case lastUpdatedAt = "last_updated_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        cameraID = try container.decode(Int.self, forKey: .cameraID)
+        petID = try container.decodeIfPresent(Int.self, forKey: .petID)
+        jobID = try container.decodeIfPresent(String.self, forKey: .jobID)
+        demoVideoName = try container.decodeIfPresent(String.self, forKey: .demoVideoName) ?? ""
+        demoVideoURL = try container.decodeIfPresent(String.self, forKey: .demoVideoURL) ?? ""
+        contextSummary = try container.decodeIfPresent(String.self, forKey: .contextSummary) ?? ""
+        processingStatus = try container.decodeIfPresent(String.self, forKey: .processingStatus) ?? "not_available"
+        stepStates = try container.decodeIfPresent([VideoAnalysisDebugStep].self, forKey: .stepStates) ?? []
+        frames = try container.decodeIfPresent([VideoAnalysisDebugFrame].self, forKey: .frames) ?? []
+        candidateClips = try container.decodeIfPresent([VideoAnalysisCandidateClip].self, forKey: .candidateClips) ?? []
+        events = try container.decodeIfPresent([VideoAnalysisDebugEvent].self, forKey: .events) ?? []
+        lastUpdatedAt = try container.decodeIfPresent(String.self, forKey: .lastUpdatedAt)
     }
 }
 
@@ -403,6 +427,36 @@ struct VideoAnalysisDebugEvent: Decodable, Sendable, Hashable, Identifiable {
         case videoStartSeconds = "video_start_seconds"
         case videoEndSeconds = "video_end_seconds"
         case frameURL = "frame_url"
+    }
+}
+
+struct VideoAnalysisCandidateClip: Decodable, Sendable, Hashable, Identifiable {
+    let id: Int
+    let sequence: Int
+    let ruleID: String
+    let primaryRule: String
+    let secondaryRules: [String]
+    let clipURL: String
+    let thumbnailURL: String
+    let startSeconds: Double
+    let endSeconds: Double
+    let analysisStatus: String
+    let summary: String
+    let eventType: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case sequence
+        case ruleID = "rule_id"
+        case primaryRule = "primary_rule"
+        case secondaryRules = "secondary_rules"
+        case clipURL = "clip_url"
+        case thumbnailURL = "thumbnail_url"
+        case startSeconds = "start_seconds"
+        case endSeconds = "end_seconds"
+        case analysisStatus = "analysis_status"
+        case summary
+        case eventType = "event_type"
     }
 }
 

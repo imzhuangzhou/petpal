@@ -18,18 +18,22 @@ struct PetSetupView: View {
     @State private var referencePhotoLocalURL: URL?
     @State private var referencePhotoRemotePath = ""
     @State private var generatedAvatarRemotePath = ""
+    @State private var avatarGenerationJobID = ""
     @State private var avatarGenerationState: AvatarGenerationState = .idle
     @State private var avatarInputMode: AvatarInputMode = .photoGenerated
     @State private var selectedCatDefaultAvatarID = "cat_american_shorthair"
     @State private var selectedDogDefaultAvatarID = "dog_beagle"
     @State private var avatarMessage: String?
+    @State private var avatarPollingTask: Task<Void, Never>?
     @State private var hasAttemptedStepOneSubmit = false
     @State private var hasScrolledToBottom = false
     @State private var scrollPosition: String?
     @State private var hasRestoredDraft = false
     private let initialStep: Int
-    private let referencePhotoMaxDimension: CGFloat = 1600
-    private let referencePhotoCompressionQuality: CGFloat = 0.85
+    private let referencePhotoMaxDimension: CGFloat = 1280
+    private let referencePhotoCompressionQuality: CGFloat = 0.75
+    private let avatarPollingIntervalNanoseconds: UInt64 = 1_500_000_000
+    private let avatarPollingMaxFailures = 3
 
     private let speciesOptions = petPalSpeciesOptions
     private let styleOptions = petPalStyleOptions
@@ -130,11 +134,13 @@ struct PetSetupView: View {
         )
         .onAppear {
             restoreDraftIfNeeded()
+            resumeAvatarGenerationPollingIfNeeded()
         }
         .onChange(of: currentPetSetupDraft) { _, newDraft in
             appStore.applyPetSetupDraft(newDraft)
         }
         .onDisappear {
+            cancelAvatarGenerationPolling()
             syncPetSetupDraft()
             cleanupReferencePhotoFile()
         }
@@ -201,6 +207,7 @@ struct PetSetupView: View {
             selectedDogDefaultAvatarID: selectedDogDefaultAvatarID,
             referencePhotoRemotePath: referencePhotoRemotePath,
             generatedAvatarRemotePath: generatedAvatarRemotePath,
+            avatarGenerationJobID: avatarGenerationJobID,
             avatarGenerationState: avatarGenerationState,
             avatarMessage: avatarMessage,
             defaultAvatarAssetName: selectedDefaultAvatarOption.artAsset.rawValue
@@ -237,6 +244,7 @@ struct PetSetupView: View {
         selectedDogDefaultAvatarID = draft.selectedDogDefaultAvatarID
         referencePhotoRemotePath = draft.referencePhotoRemotePath
         generatedAvatarRemotePath = draft.generatedAvatarRemotePath
+        avatarGenerationJobID = draft.avatarGenerationJobID
         avatarGenerationState = draft.avatarGenerationState
         avatarMessage = draft.avatarMessage
         currentStep = initialStep
@@ -614,11 +622,13 @@ struct PetSetupView: View {
 
     private func removeGeneratedAvatar() {
         errorMessage = nil
+        cancelAvatarGenerationPolling()
         avatarInputMode = .photoGenerated
         selectedReferencePhotoItem = nil
         cleanupReferencePhotoFile()
         referencePhotoRemotePath = ""
         generatedAvatarRemotePath = ""
+        avatarGenerationJobID = ""
         avatarGenerationState = .idle
         avatarMessage = "已移除当前头像，请重新选择照片。"
     }
@@ -807,11 +817,13 @@ struct PetSetupView: View {
             }
 
             let copiedURL = try persistSelectedReferencePhoto(data: photoData)
+            cancelAvatarGenerationPolling()
             cleanupReferencePhotoFile()
             avatarInputMode = .photoGenerated
             referencePhotoLocalURL = copiedURL
             referencePhotoRemotePath = ""
             generatedAvatarRemotePath = ""
+            avatarGenerationJobID = ""
             avatarGenerationState = .generating
             avatarMessage = "照片已上传，正在生成头像..."
             await generateAvatar(from: copiedURL)
@@ -821,16 +833,61 @@ struct PetSetupView: View {
     }
 
     private func generateAvatar(from localURL: URL) async {
+        cancelAvatarGenerationPolling()
         avatarGenerationState = .generating
-        avatarMessage = "正在生成头像..."
+        avatarMessage = "照片已上传，正在创建生成任务..."
 
         do {
             let response = try await appStore.apiClient.generatePetAvatar(
                 species: species,
                 imageFileURL: localURL
             )
+            applyAvatarGenerationResponse(response)
+
+            if !response.status.isTerminal {
+                guard let jobID = normalizedAvatarGenerationJobID(from: response.jobID) else {
+                    avatarGenerationState = .failed
+                    avatarMessage = "头像任务已创建，但未返回任务编号，请重新试一次。"
+                    return
+                }
+                avatarGenerationJobID = jobID
+                startAvatarGenerationPolling(jobID: jobID)
+            }
+        } catch {
+            avatarGenerationState = .failed
+            avatarMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func normalizedAvatarGenerationJobID(from rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+        let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    private func applyAvatarGenerationResponse(_ response: GeneratedPetAvatarResponse) {
+        if !response.photoURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             referencePhotoRemotePath = response.photoURL
+        }
+
+        if !response.avatarURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             generatedAvatarRemotePath = response.avatarURL
+        }
+
+        if let jobID = normalizedAvatarGenerationJobID(from: response.jobID) {
+            avatarGenerationJobID = jobID
+        }
+
+        switch response.status {
+        case .queued:
+            avatarGenerationState = .generating
+            avatarMessage = "照片已上传，正在排队生成头像..."
+        case .processing:
+            avatarGenerationState = .generating
+            avatarMessage = "正在生成头像..."
+        case .completed:
+            cancelAvatarGenerationPolling()
+            avatarGenerationJobID = ""
 
             if response.avatarURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 avatarGenerationState = .failed
@@ -839,9 +896,70 @@ struct PetSetupView: View {
                 avatarGenerationState = .generated
                 avatarMessage = "头像已生成，可以继续下一步。"
             }
-        } catch {
+        case .failed:
+            cancelAvatarGenerationPolling()
+            avatarGenerationJobID = ""
             avatarGenerationState = .failed
-            avatarMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            avatarMessage = response.generationError?.ifEmpty("卡通形象暂时生成失败，但参考照片已经保存。") ?? "卡通形象暂时生成失败，但参考照片已经保存。"
+        }
+    }
+
+    private func resumeAvatarGenerationPollingIfNeeded() {
+        guard avatarGenerationState == .generating else { return }
+        guard let jobID = normalizedAvatarGenerationJobID(from: avatarGenerationJobID) else { return }
+        startAvatarGenerationPolling(jobID: jobID)
+    }
+
+    private func cancelAvatarGenerationPolling() {
+        avatarPollingTask?.cancel()
+        avatarPollingTask = nil
+    }
+
+    private func startAvatarGenerationPolling(jobID: String) {
+        cancelAvatarGenerationPolling()
+
+        avatarPollingTask = Task { @MainActor in
+            var consecutiveFailures = 0
+
+            while !Task.isCancelled {
+                do {
+                    let response = try await appStore.apiClient.fetchPetAvatarGenerationJob(jobID: jobID)
+                    consecutiveFailures = 0
+                    applyAvatarGenerationResponse(response)
+
+                    if response.status.isTerminal {
+                        avatarPollingTask = nil
+                        return
+                    }
+                } catch {
+                    if Task.isCancelled {
+                        avatarPollingTask = nil
+                        return
+                    }
+
+                    consecutiveFailures += 1
+
+                    if consecutiveFailures >= avatarPollingMaxFailures {
+                        avatarGenerationState = .failed
+                        avatarGenerationJobID = ""
+                        avatarMessage = (error as? APIError)?.errorDescription ?? "头像生成状态查询失败，请稍后重试。"
+                        avatarPollingTask = nil
+                        return
+                    }
+
+                    avatarGenerationState = .generating
+                    avatarMessage = "正在继续查询头像生成进度..."
+                }
+
+                do {
+                    try await Task.sleep(nanoseconds: avatarPollingIntervalNanoseconds)
+                } catch {
+                    avatarPollingTask = nil
+                    return
+                }
+            }
+
+            avatarPollingTask = nil
         }
     }
 

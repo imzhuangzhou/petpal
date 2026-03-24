@@ -37,7 +37,7 @@ final class SpeechRecognizer: ObservableObject {
         }
 
         let microphoneAuthorized = await withCheckedContinuation { continuation in
-            AVAudioSession.sharedInstance().requestRecordPermission { granted in
+            AVAudioApplication.requestRecordPermission { granted in
                 continuation.resume(returning: granted)
             }
         }

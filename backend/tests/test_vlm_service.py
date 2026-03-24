@@ -193,6 +193,21 @@ class ResizeHelperTests(unittest.TestCase):
 
 
 class IdentityExtractionTests(unittest.TestCase):
+    def test_should_extract_pet_avatar_identity_defaults_to_disabled(self):
+        with patch.dict("os.environ", {}, clear=True), patch(
+            "vlm_service.DASHSCOPE_API_KEY",
+            "test-key",
+        ):
+            self.assertFalse(vlm_service._should_extract_pet_avatar_identity())
+
+    def test_should_extract_pet_avatar_identity_requires_dashscope_key(self):
+        with patch.dict(
+            "os.environ",
+            {"PETPAL_ENABLE_AVATAR_IDENTITY_EXTRACTION": "true"},
+            clear=True,
+        ), patch("vlm_service.DASHSCOPE_API_KEY", ""):
+            self.assertFalse(vlm_service._should_extract_pet_avatar_identity())
+
     def test_extract_pet_avatar_identity_summary_parses_json_code_block(self):
         fake_response = _AttrObject(
             choices=[
@@ -234,6 +249,53 @@ class IdentityExtractionTests(unittest.TestCase):
 
 
 class GeneratePetAvatarTests(unittest.TestCase):
+    def test_generate_pet_avatar_skips_identity_extraction_by_default(self):
+        class FakeModels:
+            def __init__(self):
+                self.last_kwargs = None
+
+            def generate_content(self, **kwargs):
+                self.last_kwargs = kwargs
+                return _AttrObject(
+                    candidates=[
+                        _AttrObject(
+                            content=_AttrObject(
+                                parts=[
+                                    _AttrObject(
+                                        inline_data=_AttrObject(
+                                            data=b"generated-avatar",
+                                            mime_type="image/png",
+                                        )
+                                    )
+                                ]
+                            )
+                        )
+                    ]
+                )
+
+        class FakeImageClient:
+            def __init__(self):
+                self.models = FakeModels()
+
+            def close(self):
+                return None
+
+        fake_client = FakeImageClient()
+
+        with patch("vlm_service.get_image_client", return_value=fake_client), patch(
+            "vlm_service._load_pet_avatar_reference_image",
+            return_value=(b"reference-bytes", "image/jpeg"),
+        ), patch(
+            "vlm_service._extract_pet_avatar_identity_summary",
+        ) as mock_extract_identity:
+            vlm_service.generate_pet_avatar("/tmp/pet.jpg", "cat")
+
+        mock_extract_identity.assert_not_called()
+        self.assertEqual(
+            fake_client.models.last_kwargs["contents"][0],
+            vlm_service._build_pet_avatar_generation_prompt("cat", ""),
+        )
+
     def test_generate_pet_avatar_uses_fast_square_config(self):
         class FakeModels:
             def __init__(self):
@@ -272,6 +334,9 @@ class GeneratePetAvatarTests(unittest.TestCase):
         with patch("vlm_service.get_image_client", return_value=fake_client), patch(
             "vlm_service._load_pet_avatar_reference_image",
             return_value=(b"reference-bytes", "image/jpeg"),
+        ), patch(
+            "vlm_service._should_extract_pet_avatar_identity",
+            return_value=True,
         ), patch(
             "vlm_service._extract_pet_avatar_identity_summary",
             return_value="毛色：奶油白；眼睛：琥珀色",
@@ -332,6 +397,9 @@ class GeneratePetAvatarTests(unittest.TestCase):
         with patch("vlm_service.get_image_client", return_value=fake_client), patch(
             "vlm_service._load_pet_avatar_reference_image",
             return_value=(b"reference-bytes", "image/jpeg"),
+        ), patch(
+            "vlm_service._should_extract_pet_avatar_identity",
+            return_value=True,
         ), patch(
             "vlm_service._extract_pet_avatar_identity_summary",
             side_effect=RuntimeError("vlm failed"),

@@ -1,11 +1,31 @@
 import Foundation
 
+enum AvatarGenerationJobStatus: String, Decodable, Sendable {
+    case queued
+    case processing
+    case completed
+    case failed
+
+    var isTerminal: Bool {
+        switch self {
+        case .completed, .failed:
+            return true
+        case .queued, .processing:
+            return false
+        }
+    }
+}
+
 struct GeneratedPetAvatarResponse: Decodable, Sendable {
+    let jobID: String?
+    let status: AvatarGenerationJobStatus
     let photoURL: String
     let avatarURL: String
     let generationError: String?
 
     enum CodingKeys: String, CodingKey {
+        case jobID = "job_id"
+        case status
         case photoURL = "photo_url"
         case avatarURL = "avatar_url"
         case generationError = "generation_error"

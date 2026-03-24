@@ -95,13 +95,13 @@ struct WelcomeView: View {
 
     private func onboardingErrorMessage(for error: Error) -> String {
         let backendCommand = "cd /Users/justin/Documents/demo/petpal/backend && ./start.sh"
-        let healthCheckCommand = "curl http://127.0.0.1:8000/"
+        let healthCheckCommand = "curl \(AppEnvironment.apiBaseURLString)/"
 
         if let apiError = error as? APIError {
             switch apiError {
             case .noConnection, .timedOut:
                 return """
-                无法连接本地服务，请先启动后端后再试。
+                无法连接本地服务，请先确认 iPhone 已开启个人热点、Mac 已连上热点，再启动后端后重试。
                 \(backendCommand)
                 启动后可执行：
                 \(healthCheckCommand)
@@ -109,7 +109,7 @@ struct WelcomeView: View {
             case .requestFailed:
                 return """
                 首屏请求没有连上本地服务（\(AppEnvironment.apiBaseURLString)）。
-                请先启动后端：
+                请先确认 iPhone 已开启个人热点、Mac 已连上热点，再启动后端：
                 \(backendCommand)
                 启动后可执行：
                 \(healthCheckCommand)

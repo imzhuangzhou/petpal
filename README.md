@@ -113,8 +113,15 @@ iOS 客户端通过 `ios/PetPalDemo/Resources/Info.plist` 中的 `API_BASE_URL` 
 
 | 场景 | 地址 |
 |------|------|
-| Simulator 联调 | `http://127.0.0.1:8000` |
-| 真机联调 | `http://192.168.x.x:8000`（替换为你的局域网 IP） |
+| 默认 Demo 配置 | `http://MacBook-Air.local:8000` |
+| 备用方案 | `http://192.168.x.x:8000`（替换为你的局域网 IP） |
+
+推荐的面试/路演准备方式：
+
+1. 用 iPhone 打开个人热点
+2. 让 Mac 连上这个热点
+3. 在 Mac 启动后端：`cd /Users/justin/Documents/demo/petpal/backend && ./start.sh`
+4. iPhone 真机直接运行 App，即可通过 `http://MacBook-Air.local:8000` 连到本机后端
 
 ---
 

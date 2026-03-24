@@ -134,7 +134,7 @@ def _resolve_media_path(media_url: str) -> str:
 def get_event_clip(event_id: int):
     event = query_db(
         """
-        SELECT e.id, e.video_start_seconds, e.video_end_seconds, c.demo_video_path
+        SELECT e.id, e.camera_id, e.pet_id, e.video_start_seconds, e.video_end_seconds, e.clip_url, c.demo_video_path
         FROM events e
         LEFT JOIN cameras c ON c.id = e.camera_id
         WHERE e.id = ?
@@ -145,8 +145,59 @@ def get_event_clip(event_id: int):
     if not event:
         raise HTTPException(status_code=404, detail="找不到对应事件。")
 
+    existing_clip_url = (event.get("clip_url") or "").strip()
+    if existing_clip_url:
+        try:
+            existing_clip_path = _resolve_media_path(existing_clip_url)
+        except HTTPException:
+            existing_clip_path = ""
+
+        if existing_clip_path and os.path.exists(existing_clip_path):
+            return {
+                "event_id": event_id,
+                "video_clip_url": existing_clip_url,
+            }
+
     video_start_seconds = event.get("video_start_seconds")
     video_end_seconds = event.get("video_end_seconds")
+    if video_start_seconds is not None and video_end_seconds is not None:
+        matched_clip = query_db(
+            """
+            SELECT clip_url
+            FROM candidate_clips
+            WHERE camera_id = ?
+              AND pet_id = ?
+              AND ABS(source_video_start_seconds - ?) < 0.01
+              AND ABS(source_video_end_seconds - ?) < 0.01
+              AND TRIM(clip_url) <> ''
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (
+                event.get("camera_id"),
+                event.get("pet_id"),
+                float(video_start_seconds),
+                float(video_end_seconds),
+            ),
+            one=True,
+        )
+        matched_clip_url = (matched_clip or {}).get("clip_url", "").strip()
+        if matched_clip_url:
+            try:
+                matched_clip_path = _resolve_media_path(matched_clip_url)
+            except HTTPException:
+                matched_clip_path = ""
+
+            if matched_clip_path and os.path.exists(matched_clip_path):
+                execute_db(
+                    "UPDATE events SET clip_url = ? WHERE id = ?",
+                    (matched_clip_url, event_id),
+                )
+                return {
+                    "event_id": event_id,
+                    "video_clip_url": matched_clip_url,
+                }
+
     if video_start_seconds is None or video_end_seconds is None:
         raise HTTPException(status_code=409, detail="该事件缺少视频时间范围，请重新上传并分析视频。")
 

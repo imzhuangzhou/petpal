@@ -6,6 +6,7 @@ import logging
 import mimetypes
 import subprocess
 import time
+from typing import Optional
 import google.auth
 import httpx
 from google.auth.exceptions import DefaultCredentialsError
@@ -22,6 +23,7 @@ DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 VLM_MODEL = "qwen-vl-plus"
 TEXT_MODEL = "qwen-plus"
 DASHSCOPE_TIMEOUT_SECONDS = float(os.environ.get("DASHSCOPE_TIMEOUT_SECONDS", "45"))
+VIDEO_BASE64_MAX_BYTES = 6_500_000
 VERTEX_AI_PROJECT = os.environ.get("VERTEX_AI_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT", "")
 VERTEX_AI_LOCATION = os.environ.get("VERTEX_AI_LOCATION", "global")
 VERTEX_IMAGE_MODEL = os.environ.get("VERTEX_IMAGE_MODEL", "gemini-3.1-flash-image-preview")
@@ -29,6 +31,23 @@ VERTEX_IMAGE_TIMEOUT_MS = int(os.environ.get("VERTEX_IMAGE_TIMEOUT_MS", "120000"
 VERTEX_IMAGE_MAX_RETRIES = int(os.environ.get("VERTEX_IMAGE_MAX_RETRIES", "3"))
 
 logger = logging.getLogger(__name__)
+
+
+def _is_truthy_env(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _should_extract_pet_avatar_identity() -> bool:
+    if not _is_truthy_env(os.environ.get("PETPAL_ENABLE_AVATAR_IDENTITY_EXTRACTION", "")):
+        return False
+
+    if not DASHSCOPE_API_KEY:
+        logger.info(
+            "Skipping pet avatar identity extraction because DASHSCOPE_API_KEY is not configured."
+        )
+        return False
+
+    return True
 
 
 def get_vlm_client():
@@ -535,14 +554,18 @@ def generate_pet_avatar(image_path: str, species: str) -> tuple[bytes, str]:
     try:
         image_bytes, mime_type = _load_pet_avatar_reference_image(image_path)
         identity_summary = ""
-        try:
-            identity_summary = _extract_pet_avatar_identity_summary(
-                image_bytes,
-                mime_type,
-                species,
-            )
-        except Exception as exc:
-            logger.warning("Pet identity extraction failed, falling back to single-stage generation: %s", exc)
+        if _should_extract_pet_avatar_identity():
+            try:
+                identity_summary = _extract_pet_avatar_identity_summary(
+                    image_bytes,
+                    mime_type,
+                    species,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Pet identity extraction failed, falling back to single-stage generation: %s",
+                    exc,
+                )
         prompt = _build_pet_avatar_generation_prompt(species, identity_summary)
 
         for attempt in range(1, VERTEX_IMAGE_MAX_RETRIES + 1):
@@ -616,6 +639,11 @@ def encode_image_base64(image_path: str) -> str:
     """Read an image file and return base64-encoded string."""
     with open(image_path, "rb") as f:
         return base64.b64encode(f.read()).decode("utf-8")
+
+
+def encode_file_base64(file_path: str) -> str:
+    with open(file_path, "rb") as file:
+        return base64.b64encode(file.read()).decode("utf-8")
 
 
 def describe_frame(image_path: str) -> str:
@@ -728,6 +756,184 @@ def classify_action(image_path: str) -> dict:
             "event_type": "other",
             "description": raw[:50],
         }
+
+
+def classify_clip_route_hints(frame_paths: list[str], signal_summary: Optional[dict] = None) -> dict:
+    if not frame_paths:
+        return {
+            "pet_visible": False,
+            "contains_person": False,
+            "zone_guess": "unknown",
+            "body_state_hint": "unknown",
+            "behavior_tags": [],
+            "novelty_score": 0.0,
+            "reason": "没有可分析画面",
+        }
+
+    content: list[dict] = []
+    for frame_path in frame_paths[:5]:
+        base64_image = encode_image_base64(frame_path)
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{base64_image}"
+                },
+            }
+        )
+
+    signal_text = ""
+    if signal_summary:
+        signal_text = f"附加时序信号：{json.dumps(signal_summary, ensure_ascii=False)}。"
+
+    content.append(
+        {
+            "type": "text",
+            "text": (
+                "你是 PetPal 的视频片段路由器。请根据这一组连续画面判断：宠物是否明显可见，"
+                "是否有人，画面更像食盆区/水盆区/门口/休息区/普通区域中的哪一种，"
+                "以及更偏向什么行为标签。"
+                f"{signal_text}"
+                "请严格返回 JSON，不要附带其他文字："
+                '{"pet_visible": true, "contains_person": false, "zone_guess": "unknown", '
+                '"body_state_hint": "unknown", "behavior_tags": [], "novelty_score": 0.0, "reason": ""}'
+            ),
+        }
+    )
+
+    response = _run_dashscope_completion(
+        operation="候选片段路由提示",
+        model=VLM_MODEL,
+        messages=[{"role": "user", "content": content}],
+        max_tokens=300,
+    )
+
+    try:
+        payload = _extract_json_object(response.choices[0].message.content.strip())
+    except ValueError:
+        payload = {}
+
+    return {
+        "pet_visible": bool(payload.get("pet_visible", False)),
+        "contains_person": bool(payload.get("contains_person", False)),
+        "zone_guess": str(payload.get("zone_guess", "unknown") or "unknown").strip() or "unknown",
+        "body_state_hint": str(payload.get("body_state_hint", "unknown") or "unknown").strip() or "unknown",
+        "behavior_tags": payload.get("behavior_tags", []) if isinstance(payload.get("behavior_tags"), list) else [],
+        "novelty_score": float(payload.get("novelty_score", 0.0) or 0.0),
+        "reason": str(payload.get("reason", "") or "").strip(),
+    }
+
+
+def analyze_clip_memory(
+    clip_path: str,
+    *,
+    route_hints: Optional[dict] = None,
+    frame_paths: Optional[list[str]] = None,
+    signal_summary: Optional[dict] = None,
+) -> dict:
+    route_hints = route_hints or {}
+    frame_paths = frame_paths or []
+
+    prompt_text = (
+        "你是 PetPal 的宠物视频记忆生成器。请分析这段家庭监控视频或这一组连续帧，"
+        "只返回 JSON，不要包含解释或代码块。JSON 字段必须包含："
+        '{"clip_summary":"","actions":[],"body_state":{},"appearance":{},"companions":{},'
+        '"environment":{},"mood_hypothesis":{},"intent_hypothesis":{},"health_signals":[],'
+        '"novelty_signals":[],"evidence":{},"confidence":{}}。'
+        "要求："
+        "1. clip_summary 用中文 40 字以内；"
+        "2. actions 是动作数组，可放对象 {label, confidence};"
+        "3. body_state / appearance / companions / environment / mood_hypothesis / intent_hypothesis / evidence / confidence 都必须是对象；"
+        "4. 无法确定时写 unknown 或空数组，不要编造事实；"
+        "5. 情绪、意图、健康相关都属于推测，要在字段里体现假设性质。"
+    )
+
+    meta_text = (
+        f"已知路由提示：{json.dumps(route_hints, ensure_ascii=False)}。"
+        f"已知时序信号：{json.dumps(signal_summary or {}, ensure_ascii=False)}。"
+    )
+
+    used_video_input = False
+    content: list[dict] = []
+    try:
+        file_size = os.path.getsize(clip_path)
+    except OSError:
+        file_size = VIDEO_BASE64_MAX_BYTES + 1
+
+    if file_size <= VIDEO_BASE64_MAX_BYTES:
+        try:
+            base64_video = encode_file_base64(clip_path)
+            content = [
+                {
+                    "type": "video_url",
+                    "video_url": {
+                        "url": f"data:video/mp4;base64,{base64_video}"
+                    },
+                },
+                {
+                    "type": "text",
+                    "text": f"{meta_text}{prompt_text}",
+                },
+            ]
+            response = _run_dashscope_completion(
+                operation="视频片段结构化分析",
+                model=VLM_MODEL,
+                messages=[{"role": "user", "content": content}],
+                max_tokens=900,
+            )
+            used_video_input = True
+            raw = response.choices[0].message.content.strip()
+            payload = _extract_json_object(raw)
+            return _normalize_clip_memory_payload(payload, used_video_input=used_video_input)
+        except Exception as exc:
+            logger.warning("Video clip analysis fell back to frames for %s: %s", clip_path, exc)
+
+    fallback_content: list[dict] = []
+    for frame_path in frame_paths[:5]:
+        base64_image = encode_image_base64(frame_path)
+        fallback_content.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{base64_image}"
+                },
+            }
+        )
+    fallback_content.append({"type": "text", "text": f"{meta_text}{prompt_text}"})
+    response = _run_dashscope_completion(
+        operation="视频片段关键帧结构化分析",
+        model=VLM_MODEL,
+        messages=[{"role": "user", "content": fallback_content}],
+        max_tokens=900,
+    )
+    payload = _extract_json_object(response.choices[0].message.content.strip())
+    return _normalize_clip_memory_payload(payload, used_video_input=False)
+
+
+def _normalize_clip_memory_payload(payload: dict, *, used_video_input: bool) -> dict:
+    def normalize_object(value) -> dict:
+        return value if isinstance(value, dict) else {}
+
+    def normalize_list(value) -> list:
+        return value if isinstance(value, list) else []
+
+    clip_summary = str(payload.get("clip_summary", "") or "").strip()
+    confidence = normalize_object(payload.get("confidence"))
+    confidence.setdefault("input_mode", "video" if used_video_input else "frames")
+    return {
+        "clip_summary": clip_summary,
+        "actions": normalize_list(payload.get("actions")),
+        "body_state": normalize_object(payload.get("body_state")),
+        "appearance": normalize_object(payload.get("appearance")),
+        "companions": normalize_object(payload.get("companions")),
+        "environment": normalize_object(payload.get("environment")),
+        "mood_hypothesis": normalize_object(payload.get("mood_hypothesis")),
+        "intent_hypothesis": normalize_object(payload.get("intent_hypothesis")),
+        "health_signals": normalize_list(payload.get("health_signals")),
+        "novelty_signals": normalize_list(payload.get("novelty_signals")),
+        "evidence": normalize_object(payload.get("evidence")),
+        "confidence": confidence,
+    }
 
 
 def review_pet_vocalization(frame_paths: list[str], species: str) -> dict:

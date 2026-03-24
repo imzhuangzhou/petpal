@@ -250,7 +250,7 @@ class DailyReportCardTests(unittest.TestCase):
 
 class MatchRelatedEventsTests(unittest.TestCase):
     @patch("dialogue_engine.get_cached_event_context")
-    def test_match_related_events_returns_event_metadata_without_frame_url(self, mock_get_cached_event_context):
+    def test_match_related_events_returns_event_metadata_with_clip_url(self, mock_get_cached_event_context):
         mock_get_cached_event_context.return_value = (
             "",
             {},
@@ -260,6 +260,7 @@ class MatchRelatedEventsTests(unittest.TestCase):
                     "event_type": "playing",
                     "description": "在客厅追球",
                     "timestamp": "2026-03-23T10:00:00",
+                    "clip_url": "/media/clips/chase-ball.mp4",
                     "frame_path": "/frames/ball.jpg",
                 }
             ],
@@ -269,7 +270,7 @@ class MatchRelatedEventsTests(unittest.TestCase):
 
         self.assertEqual(len(related), 1)
         self.assertEqual(related[0]["event_id"], 3)
-        self.assertEqual(related[0]["video_clip_url"], "")
+        self.assertEqual(related[0]["video_clip_url"], "/media/clips/chase-ball.mp4")
 
 
 class SystemPromptTests(unittest.TestCase):

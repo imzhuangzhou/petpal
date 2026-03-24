@@ -54,7 +54,7 @@ enum APIError: Error, LocalizedError, Sendable {
         case .notConnectedToInternet, .networkConnectionLost:
             return .noConnection
         case .cannotConnectToHost, .cannotFindHost:
-            return .requestFailed("无法连接到后端服务。请确认后端已启动；模拟器联调请使用 127.0.0.1，真机请使用电脑的局域网 IP。")
+            return .requestFailed("无法连接到后端服务。请确认后端已启动；推荐用 iPhone 个人热点让 Mac 连上同一网络，并使用 Mac 的 .local 地址。")
         case .timedOut:
             return .timedOut
         case .cancelled:

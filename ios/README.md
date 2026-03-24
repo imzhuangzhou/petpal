@@ -34,13 +34,24 @@
 
 代码不会再回退到内置的 `localhost` 默认值；如果这个配置为空或非法，App 会在启动时直接暴露配置问题。
 
-例如本机联调可以写成：
+当前默认值已经改成：
 
 ```text
-http://127.0.0.1:8000
+http://MacBook-Air.local:8000
 ```
 
-如果后端跑在局域网机器上，可以改成：
+推荐的真机 Demo 方式是：
+
+1. iPhone 打开个人热点
+2. Mac 连上这个热点
+3. 启动后端 `cd /Users/justin/Documents/demo/petpal/backend && ./start.sh`
+4. iPhone 真机运行 App，直接访问：
+
+```text
+http://MacBook-Air.local:8000
+```
+
+如果后端跑在别的局域网机器上，或 `.local` 解析失败，也可以改成：
 
 ```text
 http://192.168.x.x:8000

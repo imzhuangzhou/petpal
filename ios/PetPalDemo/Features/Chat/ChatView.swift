@@ -769,7 +769,7 @@ struct ChatView: View {
                 Spacer(minLength: 8)
 
                 Button {
-                    toggleRelatedEventExpansion(for: eventKey, eventID: event.id)
+                    toggleRelatedEventExpansion(for: eventKey, event: event)
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: isExpanded ? "chevron.up.circle.fill" : "play.rectangle.fill")
@@ -845,7 +845,7 @@ struct ChatView: View {
         return isoString
     }
 
-    private func toggleRelatedEventExpansion(for eventKey: RelatedEventExpansionKey, eventID: Int) {
+    private func toggleRelatedEventExpansion(for eventKey: RelatedEventExpansionKey, event: RelatedEvent) {
         let shouldExpand = expandedRelatedEventKey != eventKey
         withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
             expandedRelatedEventKey = shouldExpand ? eventKey : nil
@@ -855,8 +855,12 @@ struct ChatView: View {
             return
         }
 
+        if resolvedVideoURL(for: event) != nil {
+            return
+        }
+
         Task {
-            await loadRelatedEventClipIfNeeded(eventID: eventID)
+            await loadRelatedEventClipIfNeeded(eventID: event.id)
         }
     }
 
